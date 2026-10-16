@@ -650,10 +650,18 @@ jobs:
           }
 
           wait_for_url GET https://api.fildah.com/health/
-          wait_for_url HEAD https://auth.fildah.com
-          wait_for_url HEAD https://www.fildah.com
-          wait_for_url HEAD https://healthscout.fildah.com
-          wait_for_url HEAD https://rxchat.fildah.com
+          # A dark or retired product domain must not fail another service's deploy.
+          case "$SERVICE" in
+            auth-web) wait_for_url HEAD https://auth.fildah.com ;;
+            fildah-web) wait_for_url HEAD https://www.fildah.com ;;
+            healthscout-web) wait_for_url HEAD https://healthscout.fildah.com ;;
+            rxchat-web) wait_for_url HEAD https://rxchat.fildah.com ;;
+            caddy|all)
+              wait_for_url HEAD https://auth.fildah.com
+              wait_for_url HEAD https://www.fildah.com
+              wait_for_url HEAD https://rxchat.fildah.com
+              ;;
+          esac
 
           verify_frontend_build() {
             service_name="$1"
