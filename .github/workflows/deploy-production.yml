@@ -21,7 +21,7 @@ on:
           - auth-web
           - caddy
           - fildah-web
-          - healthscout-web
+          - index-web
           - rxchat-web
           - all
       image_tag:
@@ -70,7 +70,7 @@ jobs:
         run: |
           set -eu
           case "$SERVICE" in
-            preflight|api|auth-web|caddy|fildah-web|healthscout-web|rxchat-web|all) ;;
+            preflight|api|auth-web|caddy|fildah-web|index-web|rxchat-web|all) ;;
             *) echo "Unknown service: $SERVICE" >&2; exit 1 ;;
           esac
           if [ "$SERVICE" = "all" ] || [ "$SERVICE" = "caddy" ] || [ "$SERVICE" = "preflight" ]; then
@@ -88,7 +88,7 @@ jobs:
             api) package="fildah-api" ;;
             auth-web) package="auth-web" ;;
             fildah-web) package="fildah-web" ;;
-            healthscout-web) package="healthscout-web" ;;
+            index-web) package="index-web" ;;
             rxchat-web) package="rxchat-web" ;;
           esac
           IMAGE="ghcr.io/fildahs/${package}:${IMAGE_TAG}"
@@ -340,14 +340,14 @@ jobs:
             fildah-web)
               targets="fildah-web"
               ;;
-            healthscout-web)
-              targets="healthscout-web"
+            index-web)
+              targets="index-web"
               ;;
             rxchat-web)
               targets="rxchat-web"
               ;;
             all)
-              targets="api worker attachment-worker billing-beat auth-web fildah-web healthscout-web rxchat-web"
+              targets="api worker attachment-worker billing-beat auth-web fildah-web index-web rxchat-web"
               ;;
           esac
 
@@ -554,8 +554,8 @@ jobs:
             fildah-web)
               set_image_var FILDAH_WEB_IMAGE "$IMAGE"
               ;;
-            healthscout-web)
-              set_image_var HEALTHSCOUT_WEB_IMAGE "$IMAGE"
+            index-web)
+              set_image_var INDEX_WEB_IMAGE "$IMAGE"
               ;;
             rxchat-web)
               set_image_var RXCHAT_WEB_IMAGE "$IMAGE"
@@ -604,11 +604,11 @@ jobs:
               verify_running_image billing-beat "$worker_image"
               ;;
             all)
-              for service_name in api worker attachment-worker billing-beat auth-web fildah-web healthscout-web rxchat-web; do
+              for service_name in api worker attachment-worker billing-beat auth-web fildah-web index-web rxchat-web; do
                 verify_running_image "$service_name" ""
               done
               ;;
-            auth-web|fildah-web|healthscout-web|rxchat-web)
+            auth-web|fildah-web|index-web|rxchat-web)
               verify_running_image "$SERVICE" "$IMAGE"
               ;;
           esac
@@ -654,7 +654,7 @@ jobs:
           case "$SERVICE" in
             auth-web) wait_for_url HEAD https://auth.fildah.com ;;
             fildah-web) wait_for_url HEAD https://www.fildah.com ;;
-            healthscout-web) wait_for_url HEAD https://healthscout.fildah.com ;;
+            index-web) wait_for_url HEAD https://index.fildah.com ;;
             rxchat-web) wait_for_url HEAD https://rxchat.fildah.com ;;
             caddy|all)
               wait_for_url HEAD https://auth.fildah.com
@@ -679,7 +679,7 @@ jobs:
 
           verify_frontend_build auth-web https://auth.fildah.com/build.txt auth.fildah.com
           verify_frontend_build fildah-web https://www.fildah.com/build.txt www.fildah.com
-          verify_frontend_build healthscout-web https://healthscout.fildah.com/build.txt healthscout.fildah.com
+          verify_frontend_build index-web https://index.fildah.com/build.txt index.fildah.com
           verify_frontend_build rxchat-web https://rxchat.fildah.com/build.txt rxchat.fildah.com
           docker compose -f compose.yml ps </dev/null
           printf 'Deployed %s from %s at %s\n' "$SERVICE" "$SOURCE_REPO" "$COMMIT_SHA"
@@ -712,7 +712,7 @@ jobs:
               "worker": "fildah-api-worker",
               "auth-web": "auth-web",
               "fildah-web": "fildah-web",
-              "healthscout-web": "healthscout-web",
+              "index-web": "index-web",
               "rxchat-web": "rxchat-web",
           }
           service = os.environ["SERVICE"]
