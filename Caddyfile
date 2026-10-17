@@ -34,9 +34,9 @@ auth.fildah.com {
 	reverse_proxy auth-web:80
 }
 
-healthscout.fildah.com {
+index.fildah.com {
 	encode zstd gzip
-	reverse_proxy healthscout-web:80
+	reverse_proxy index-web:3000
 }
 
 rxchat.fildah.com {
