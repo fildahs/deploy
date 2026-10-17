@@ -137,6 +137,8 @@ services:
   # Node, not nginx: public pages render on the server (index-1 Slice 4).
   index-web:
     image: ${INDEX_WEB_IMAGE:-ghcr.io/fildahs/index-web:main}
+    environment:
+      UNDER_CONSTRUCTION: ${INDEX_UNDER_CONSTRUCTION:-true}
     restart: unless-stopped
     expose:
       - "3000"
