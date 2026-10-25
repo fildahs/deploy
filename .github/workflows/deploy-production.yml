@@ -257,7 +257,7 @@ jobs:
           set -eu
           ssh_opts="-4 -i ~/.ssh/fildah_vps -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20"
           ssh $ssh_opts "$VPS_USER@$VPS_HOST" \
-            DEPLOY_REPO_URL="https://github.com/fildahs/fildah-deploy.git" \
+            DEPLOY_REPO_URL="https://github.com/fildahs/deploy.git" \
             DEPLOY_SHA="$GITHUB_SHA" \
             'bash -se' <<'REMOTE'
           set -euo pipefail

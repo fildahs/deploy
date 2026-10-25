@@ -1,4 +1,4 @@
-# This folder contains the configuration needed to run your entire stack (`fildah-api`, `fildah-web`, and `rxchat-web`) on your own Virtual Private Server (VPS).
+# This folder contains the configuration needed to run the Fildah stack (`api`, `fildah-web`, and `care-web`) on your own Virtual Private Server (VPS).
 
 Source documents and other Django media use the persistent `django_media`
 volume by default. To move media to S3 or Cloudflare R2, copy the
