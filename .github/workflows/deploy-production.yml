@@ -1,16 +1,13 @@
 name: Deploy Production
 
 on:
-  push:
-    branches:
-      - main
-    paths-ignore:
-      - .github/workflows/deploy-production.yml
-  repository_dispatch:
-    types:
-      - deploy-service
   workflow_dispatch:
     inputs:
+      confirm_deploy:
+        description: I approve running this production operation
+        required: true
+        type: boolean
+        default: false
       service:
         description: Service to deploy
         required: true
@@ -23,7 +20,6 @@ on:
           - fildah-web
           - index-web
           - rxchat-web
-          - all
       image_tag:
         description: Image tag to deploy for one-service rollbacks, for example a commit SHA
         required: false
@@ -39,6 +35,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: production
@@ -50,10 +47,10 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     env:
-      SERVICE: ${{ github.event.client_payload.service || inputs.service || 'caddy' }}
-      IMAGE_TAG: ${{ github.event.client_payload.image_tag || inputs.image_tag }}
-      SOURCE_REPO: ${{ github.event.client_payload.source_repo || inputs.source_repo }}
-      COMMIT_SHA: ${{ github.event.client_payload.commit_sha || inputs.commit_sha }}
+      SERVICE: ${{ inputs.service }}
+      IMAGE_TAG: ${{ inputs.image_tag }}
+      SOURCE_REPO: ${{ inputs.source_repo }}
+      COMMIT_SHA: ${{ inputs.commit_sha }}
       VPS_HOST: ${{ secrets.VPS_HOST }}
       VPS_USER: ${{ secrets.VPS_USER }}
       GHCR_READ_USER: ${{ secrets.GHCR_READ_USER }}
@@ -66,11 +63,17 @@ jobs:
       - name: Check out deploy config
         uses: actions/checkout@v4
 
+      - name: Require manual approval and successful release CI
+        env:
+          CI_READ_TOKEN: ${{ secrets.DEPLOY_REPO_DISPATCH_TOKEN || github.token }}
+          DEPLOY_APPROVED: ${{ inputs.confirm_deploy }}
+        run: python3 scripts/require_release_ci.py
+
       - name: Validate deployment request
         run: |
           set -eu
           case "$SERVICE" in
-            preflight|api|auth-web|caddy|fildah-web|index-web|rxchat-web|all) ;;
+            preflight|api|auth-web|caddy|fildah-web|index-web|rxchat-web) ;;
             *) echo "Unknown service: $SERVICE" >&2; exit 1 ;;
           esac
           if [ "$SERVICE" = "all" ] || [ "$SERVICE" = "caddy" ] || [ "$SERVICE" = "preflight" ]; then
