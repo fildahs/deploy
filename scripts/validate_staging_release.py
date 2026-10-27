@@ -24,7 +24,7 @@ def validate(bundle, release):
         if not re.fullmatch('[0-9a-f]{40}', values[source + '_SHA']):
             raise SystemExit('Invalid source SHA')
     for key, (package, source) in images.items():
-        expected = 'ghcr.io/fildahs/' + package + ':staging-' + values[source + '_SHA'] + '@sha256:[0-9a-f]{64}'
+        expected = re.escape('ghcr.io/fildahs/' + package + ':staging-' + values[source + '_SHA']) + '@sha256:[0-9a-f]{64}'
         if not re.fullmatch(expected, values[key]):
             raise SystemExit('Release images must match sources and be digest pinned')
     if hashlib.sha256(bundle.read_bytes()).hexdigest() != values['CONFIG_SHA256']:

@@ -119,7 +119,7 @@ class ReleaseValidationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             bundle, manifest = self.artifact(Path(temp))
             valid = manifest.read_text()
-            changes = [valid.replace(':staging-', ':main-', 1), valid.replace('@sha256:'+'b'*64, '', 1), valid.replace('API_SHA='+'a'*40, 'API_SHA='+'c'*40), valid+'API_SHA='+'a'*40+'\n', valid.replace('CONFIG_SHA256=', 'UNKNOWN=')]
+            changes = [valid.replace('ghcr.io', 'ghcrXio', 1), valid.replace(':staging-', ':main-', 1), valid.replace('@sha256:'+'b'*64, '', 1), valid.replace('API_SHA='+'a'*40, 'API_SHA='+'c'*40), valid+'API_SHA='+'a'*40+'\n', valid.replace('CONFIG_SHA256=', 'UNKNOWN=')]
             for content in changes:
                 manifest.write_text(content)
                 with self.subTest(content=content[:20]), self.assertRaises(SystemExit):
