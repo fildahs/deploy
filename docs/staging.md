@@ -3,7 +3,7 @@
 Staging uses `/srv/fildah/staging`, Compose project `staging`, backup root
 `/srv/fildah/backups/staging`, seven `fsandcube-*` hosts and the
 `fildah-staging` Cloudflare Tunnel. It publishes no host ports. Production
-keeps project `deploy`; independent RxChat keeps project `rxchat`.
+keeps project `deploy`; all other stacks remain independent.
 Neither stack is deployed or moved by this procedure.
 
 The owner's 2026-10-27 decision replaces staging Actions with local gates,
@@ -34,7 +34,11 @@ skips source/deploy jobs; staging pushes never run CI.
 4. Successful checks write logs and `gates.json` under
    `.local/staging-test-1/release/`. The receipt records every commit, the
    workspace Makefile hash, public build URLs and log hashes. A failed rerun
-   removes any prior receipt. A later source change invalidates the receipt.
+   removes any prior aggregate receipt. Successful per-repository checkpoints
+   survive later failures; only unchanged inputs/commands and matching log
+   hashes can be reused. API checkpoints also bind the test wrapper/Makefile;
+   Care/Index bind their contracts, and deploy binds every audited source SHA.
+   A later source change invalidates the affected checks.
    Complete local cross-app browser/SSR checks and obtain Claude's review
    before release. Record unfinished/unverified flows explicitly.
 5. Push the verified commits to `staging`. No push to main or workflow-only
@@ -119,8 +123,10 @@ host-key checking or trust an unverified `ssh-keyscan` result.
    `bash /absolute/upload/scripts/rollout-staging /absolute/upload/deploy-SHA.tar /absolute/upload/staging.release`.
    It takes a nonblocking rollout lock, validates source/digest fields and
    archive paths/hash, then validates the candidate Compose config without
-   displaying secrets. No production env/configuration is loaded.
-4. The script captures production and RxChat container IDs, status and start
+   displaying secrets. Compose receives a clean environment plus the explicit
+   staging files, so caller exports cannot substitute production values. No
+   production env/configuration is loaded.
+4. The script captures all non-staging container IDs, status and start
    timestamps. On an existing staging stack it stops staging writers, dumps
    PostgreSQL and validates the dump listing, stops Redis/Qdrant, and archives
    non-Postgres staging volumes read-only. This causes staging downtime.
@@ -130,7 +136,7 @@ host-key checking or trust an unverified `ssh-keyscan` result.
 5. Install the reviewed config/release, pull pinned images, start stores,
    migrate, sync platform settings and start staging. Verify API health,
    exact frontend build SHAs, worker pings, all 14 running services, no
-   published ports, and unchanged production/RxChat IDs/start timestamps.
+   published ports, and unchanged non-staging IDs/start timestamps.
    A failure leaves backups and any stopped staging services for investigation;
    there is no automatic restore, volume deletion or production action.
 6. Create the owner's staging superuser interactively if needed; configure

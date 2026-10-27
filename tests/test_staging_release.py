@@ -65,10 +65,24 @@ class LocalStagingReleaseTests(unittest.TestCase):
             directory = Path(temp)
             receipt = directory / 'gates.json'
             receipt.write_text('old success')
-            with patch.object(release, 'select', return_value={}), patch.object(release, 'fingerprint', return_value='hash'), patch.object(release.subprocess, 'run', side_effect=subprocess.CalledProcessError(1, 'test')):
+            with patch.object(release, 'select', return_value={repo: 'a'*40 for repo in release.SOURCES}), patch.object(release, 'fingerprint', return_value='hash'), patch.object(release.subprocess, 'run', side_effect=subprocess.CalledProcessError(1, 'test')):
                 with self.assertRaises(subprocess.CalledProcessError):
                     release.gate(directory)
             self.assertFalse(receipt.exists())
+
+    def test_repo_checkpoint_reuses_only_identical_inputs_and_unchanged_log(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            checkpoint, log = directory / 'gate.json', directory / 'gate.log'
+            log.write_text('passed')
+            inputs = {'source': 'a'*40, 'commands': [['test']], 'runner_sha256': 'original'}
+            release.record_gate(checkpoint, inputs, log)
+            self.assertTrue(release.reusable(checkpoint, inputs, log))
+            for key, value in [('source', 'b'*40), ('commands', [['different']]), ('runner_sha256', 'changed')]:
+                with self.subTest(key=key):
+                    self.assertFalse(release.reusable(checkpoint, {**inputs, key: value}, log))
+            log.write_text('modified')
+            self.assertFalse(release.reusable(checkpoint, inputs, log))
 
     def test_staging_ssh_script_refuses_other_directories_before_docker(self):
         result = subprocess.run(['bash', str(ROOT / 'scripts/rollout-staging'), '/no/bundle', '/no/release'], cwd='/tmp', capture_output=True, text=True)

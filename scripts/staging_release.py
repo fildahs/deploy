@@ -85,6 +85,32 @@ def commands(repo):
     return result
 
 
+def gate_inputs(repo, sources):
+    result = {'source': sources[repo], 'commands': commands(repo), 'build_urls': URLS}
+    if repo == 'api':
+        result['makefile_sha256'] = fingerprint()
+        result['runner_sha256'] = hashlib.sha256((ROOT / 'deploy/scripts/staging_api_test.py').read_bytes()).hexdigest()
+    if repo in ('care-web', 'index-web'):
+        contract = 'openapi-care.yaml' if repo == 'care-web' else 'openapi-index.yaml'
+        result['contract_sha256'] = hashlib.sha256((ROOT / 'api/docs' / contract).read_bytes()).hexdigest()
+    if repo == 'deploy':
+        # Deployment tests audit source workflows across the workspace.
+        result['workflow_sources'] = sources
+    return result
+
+
+def reusable(checkpoint, inputs, logfile):
+    try:
+        record = json.loads(checkpoint.read_text())
+        return record['inputs'] == inputs and record['log_sha256'] == hashlib.sha256(logfile.read_bytes()).hexdigest()
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
+def record_gate(checkpoint, inputs, logfile):
+    checkpoint.write_text(json.dumps({'inputs': inputs, 'log_sha256': hashlib.sha256(logfile.read_bytes()).hexdigest()}, indent=2) + '\n')
+
+
 def gate(directory):
     sources = select()
     make_sha = fingerprint()
@@ -95,6 +121,13 @@ def gate(directory):
     env = {**os.environ, **URLS, 'UNDER_CONSTRUCTION': 'false'}
     for repo in SOURCES:
         path = directory / f'{repo}.log'
+        checkpoint = directory / f'{repo}.gate.json'
+        inputs = gate_inputs(repo, sources)
+        if reusable(checkpoint, inputs, path):
+            print(f'Reusing verified {repo} at {sources[repo]}', flush=True)
+            evidence[repo] = hashlib.sha256(path.read_bytes()).hexdigest()
+            continue
+        checkpoint.unlink(missing_ok=True)
         print(f'Checking {repo}; log: {path}', flush=True)
         with path.open('w') as log:
             for command in commands(repo):
@@ -102,6 +135,9 @@ def gate(directory):
                 log.flush()
                 subprocess.run(command, cwd=ROOT if repo == 'api' else ROOT / repo,
                                env=env, stdout=log, stderr=subprocess.STDOUT, check=True)
+        if select()[repo] != sources[repo] or gate_inputs(repo, sources) != inputs:
+            raise ValueError(f'{repo}: gate inputs changed during checks')
+        record_gate(checkpoint, inputs, path)
         evidence[repo] = hashlib.sha256(path.read_bytes()).hexdigest()
     if select() != sources or fingerprint() != make_sha:
         raise ValueError('Sources changed during the gate; rerun against the final commits')

@@ -12,20 +12,24 @@ test ! -L .env
 chmod 600 .env
 bundle="$(realpath "$1")"
 release="$(realpath "$2")"
+export DOCKER_HOST=unix:///var/run/docker.sock
+unset DOCKER_CONTEXT
+compose_env=(env -i PATH="$PATH" HOME="$HOME" DOCKER_HOST="$DOCKER_HOST")
+if [[ -n "${DOCKER_CONFIG:-}" ]]; then compose_env+=(DOCKER_CONFIG="$DOCKER_CONFIG"); fi
 # Validate everything BEFORE backup, extraction, compose or loading a release.
 python3 "$(dirname "${BASH_SOURCE[0]}")/validate_staging_release.py" "$bundle" "$release"
 mkdir -p /srv/fildah/backups/staging
 candidate="$(mktemp -d /srv/fildah/staging/.candidate-XXXXXXXX)"
 trap 'rm -rf "$candidate"' EXIT
 tar -xf "$bundle" --no-same-owner -C "$candidate"
-docker compose -p staging --project-directory "$candidate" -f "$candidate/compose.yml" -f "$candidate/compose.staging.yml" --env-file /srv/fildah/staging/.env --env-file "$release" config --format json | python3 "$candidate/scripts/assert_staging.py"
+"${compose_env[@]}" docker compose -p staging --project-directory "$candidate" -f "$candidate/compose.yml" -f "$candidate/compose.staging.yml" --env-file /srv/fildah/staging/.env --env-file "$release" config --format json | python3 "$candidate/scripts/assert_staging.py"
 backup="$(mktemp -d /srv/fildah/backups/staging/rollout-XXXXXXXX)"
 # Capture ALL production containers (including stopped) and start timestamps.
 snapshot_production() {
   local ids
-  ids="$(for project in deploy rxchat; do docker ps -aq --filter "label=com.docker.compose.project=$project"; done)"
+  ids="$(docker ps -aq)"
   if [[ -n "$ids" ]]; then
-    docker inspect $ids --format '{{.Id}} {{.State.Status}} {{.State.StartedAt}}' | sort
+    docker inspect $ids --format '{{if ne (index .Config.Labels "com.docker.compose.project") "staging"}}{{.Id}} {{.State.Status}} {{.State.StartedAt}}{{end}}' | sed '/^$/d' | sort
   fi
 }
 snapshot_production > "$backup/production.before"
@@ -62,7 +66,7 @@ fi
 tar -xf "$bundle" --no-same-owner
 if [[ -f .release ]] && ! cmp -s .release "$release"; then cp -p .release .release.previous; fi
 install -m 600 "$release" .release
-compose=(docker compose -p staging -f compose.yml -f compose.staging.yml --env-file .env --env-file .release)
+compose=("${compose_env[@]}" docker compose -p staging -f compose.yml -f compose.staging.yml --env-file .env --env-file .release)
 "${compose[@]}" config --format json | python3 scripts/assert_staging.py
 "${compose[@]}" pull
 "${compose[@]}" up -d postgres redis qdrant
