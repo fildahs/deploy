@@ -127,6 +127,14 @@ jobs:
             -o ConnectTimeout=20 \
             "$VPS_USER@$VPS_HOST" "true"
 
+      - name: Require review of retained standalone RxChat production overrides
+        run: |
+          ssh -4 -i ~/.ssh/fildah_vps -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 \
+            "$VPS_USER@$VPS_HOST" 'test ! -x /srv/rxchat-open/production-proxy' || {
+              echo 'Production rollout blocked: integrate the retained RxChat proxy and scheduler overrides before this workflow can modify production.' >&2
+              exit 1
+            }
+
       - name: Read-only production preflight
         if: env.SERVICE == 'preflight'
         run: |
@@ -135,7 +143,7 @@ jobs:
           ssh $ssh_opts "$VPS_USER@$VPS_HOST" 'bash -se' <<'REMOTE'
           set -euo pipefail
           cd /srv/fildah/deploy
-          docker compose -f compose.yml config >/dev/null
+          ./scripts/compose-production config >/dev/null
           python3 - <<'PY'
           from pathlib import Path
 
@@ -163,12 +171,12 @@ jobs:
           PY
           df -Pk /srv/fildah
           for service_name in api worker attachment-worker billing-beat; do
-            container_id="$(docker compose -f compose.yml ps -q "$service_name")"
+            container_id="$(./scripts/compose-production ps -q "$service_name")"
             test -n "$container_id"
             printf '%s ' "$service_name"
             docker inspect --format '{{.Config.Image}} {{.Image}}' "$container_id"
           done
-          docker compose -f compose.yml exec -T postgres sh -c \
+          ./scripts/compose-production exec -T postgres sh -c \
             'psql -X -U "${POSTGRES_USER:-fildah}" -d "${POSTGRES_DB:-fildah}" -At -v ON_ERROR_STOP=1' <<'SQL'
           SELECT 'database_bytes', pg_database_size(current_database());
           SELECT 'applied_migration', app, max(name) FROM django_migrations
@@ -177,7 +185,7 @@ jobs:
             count(*) FILTER (WHERE is_active) FROM billing_providerplan
             GROUP BY provider, billing_cycle ORDER BY provider, billing_cycle;
           SQL
-          weekly_counts="$(docker compose -f compose.yml exec -T postgres sh -c \
+          weekly_counts="$(./scripts/compose-production exec -T postgres sh -c \
             'psql -X -U "${POSTGRES_USER:-fildah}" -d "${POSTGRES_DB:-fildah}" -At -v ON_ERROR_STOP=1' <<'SQL'
           SELECT
             (SELECT count(*) FROM billing_subscription
@@ -195,7 +203,7 @@ jobs:
           done
           printf 'Weekly customer rows: subscriptions=%s pending_payments=%s live_provider_subscriptions=%s\n' \
             "$weekly_subs" "$weekly_payments" "$weekly_provider_subs"
-          docker compose -f compose.yml exec -T api python - <<'PY'
+          ./scripts/compose-production exec -T api python - <<'PY'
           import json
           import os
           import urllib.parse
@@ -251,6 +259,7 @@ jobs:
             --filter=':- .gitignore' \
             --exclude='.git/' \
             --exclude='.env' \
+            --exclude='.rxchat-standalone' \
             -e "ssh $ssh_opts" \
             ./ "$VPS_USER@$VPS_HOST:/srv/fildah/deploy/"
 
@@ -370,7 +379,7 @@ jobs:
           check_weekly_state() {
             # The monthly-only migration changes weekly customer state and
             # cannot cancel an existing subscription at the payment provider.
-            weekly_counts="$(docker compose -f compose.yml exec -T postgres sh -c \
+            weekly_counts="$(./scripts/compose-production exec -T postgres sh -c \
               'psql -X -U "${POSTGRES_USER:-fildah}" -d "${POSTGRES_DB:-fildah}" -At -v ON_ERROR_STOP=1' <<'SQL'
           SELECT
             (SELECT count(*) FROM billing_subscription
@@ -405,7 +414,7 @@ jobs:
           test -f "$backup_dir/.env"
           test -f "$backup_dir/compose.yml"
           test -f "$backup_dir/Caddyfile"
-          docker compose -f compose.yml config >/dev/null
+          ./scripts/compose-production config >/dev/null
 
           if [ "$SERVICE" = "api" ] || [ "$SERVICE" = "all" ]; then
             # A previous pin may be the mutable :main tag. Keep the exact
@@ -413,7 +422,7 @@ jobs:
             preserve_running_image() {
               service_name="$1"
               package="$2"
-              container_id="$(docker compose -f compose.yml ps -q "$service_name")"
+              container_id="$(./scripts/compose-production ps -q "$service_name")"
               test -n "$container_id"
               image_id="$(docker inspect --format '{{.Image}}' "$container_id")"
               docker image inspect "$image_id" >/dev/null
@@ -423,10 +432,10 @@ jobs:
             }
             preserve_running_image api fildah-api
             preserve_running_image worker fildah-api-worker
-            worker_container_id="$(docker compose -f compose.yml ps -q worker)"
+            worker_container_id="$(./scripts/compose-production ps -q worker)"
             worker_image_id="$(docker inspect --format '{{.Image}}' "$worker_container_id")"
             for service_name in attachment-worker billing-beat; do
-              container_id="$(docker compose -f compose.yml ps -q "$service_name")"
+              container_id="$(./scripts/compose-production ps -q "$service_name")"
               test -n "$container_id"
               running_image_id="$(docker inspect --format '{{.Image}}' "$container_id")"
               if [ "$running_image_id" != "$worker_image_id" ]; then
@@ -435,17 +444,17 @@ jobs:
               fi
             done
             restart_old_stack() {
-              docker compose -f compose.yml up -d \
+              ./scripts/compose-production up -d \
                 api worker attachment-worker billing-beat caddy </dev/null
             }
             # Stop new requests and scheduled jobs before stopping the API;
             # leave workers running until API requests can no longer enqueue.
             # All old writers must stop before backup and migration.
-            if ! docker compose -f compose.yml stop --timeout 180 caddy billing-beat </dev/null; then
+            if ! ./scripts/compose-production stop --timeout 180 caddy billing-beat </dev/null; then
               restart_old_stack
               exit 1
             fi
-            if ! docker compose -f compose.yml stop --timeout 180 api </dev/null; then
+            if ! ./scripts/compose-production stop --timeout 180 api </dev/null; then
               restart_old_stack
               exit 1
             fi
@@ -454,7 +463,7 @@ jobs:
               restart_old_stack
               exit 1
             fi
-            if ! attachment_container_id="$(docker compose -f compose.yml ps -q attachment-worker)" \
+            if ! attachment_container_id="$(./scripts/compose-production ps -q attachment-worker)" \
               || [ -z "$attachment_container_id" ]; then
               restart_old_stack
               exit 1
@@ -466,7 +475,7 @@ jobs:
             drain_ok=0
             clear_checks=0
             for attempt in $(seq 1 18); do
-              if docker compose -f compose.yml exec -T worker \
+              if ./scripts/compose-production exec -T worker \
                 python - "celery@$worker_host" "celery@$attachment_host" <<'PY'
           import os
           import sys
@@ -513,15 +522,15 @@ jobs:
               restart_old_stack
               exit 1
             fi
-            if ! docker compose -f compose.yml stop --timeout 180 worker attachment-worker </dev/null; then
+            if ! ./scripts/compose-production stop --timeout 180 worker attachment-worker </dev/null; then
               restart_old_stack
               exit 1
             fi
             verify_empty_queues() {
               local celery_queued attachment_queued unacked count
-              celery_queued="$(docker compose -f compose.yml exec -T redis redis-cli --raw LLEN celery </dev/null)" || return 1
-              attachment_queued="$(docker compose -f compose.yml exec -T redis redis-cli --raw LLEN attachments </dev/null)" || return 1
-              unacked="$(docker compose -f compose.yml exec -T redis redis-cli --raw HLEN unacked </dev/null)" || return 1
+              celery_queued="$(./scripts/compose-production exec -T redis redis-cli --raw LLEN celery </dev/null)" || return 1
+              attachment_queued="$(./scripts/compose-production exec -T redis redis-cli --raw LLEN attachments </dev/null)" || return 1
+              unacked="$(./scripts/compose-production exec -T redis redis-cli --raw HLEN unacked </dev/null)" || return 1
               for count in "$celery_queued" "$attachment_queued" "$unacked"; do
                 [[ "$count" =~ ^[0-9]+$ ]] || return 1
               done
@@ -540,7 +549,7 @@ jobs:
               exit 1
             fi
           fi
-          docker compose -f compose.yml exec -T postgres sh -c \
+          ./scripts/compose-production exec -T postgres sh -c \
             'pg_dump -U "${POSTGRES_USER:-fildah}" "${POSTGRES_DB:-fildah}"' \
             </dev/null | gzip > "$backup_dir/postgres.sql.gz"
           gzip -t "$backup_dir/postgres.sql.gz"
@@ -566,25 +575,25 @@ jobs:
           esac
 
           if [ "$SERVICE" = "api" ] || [ "$SERVICE" = "all" ]; then
-            docker compose -f compose.yml run --rm --no-deps api \
+            ./scripts/compose-production run --rm --no-deps api \
               python manage.py migrate --noinput </dev/null
           fi
           if [ "$SERVICE" = "caddy" ]; then
-            docker compose -f compose.yml up -d --force-recreate caddy </dev/null
-            docker compose -f compose.yml restart caddy </dev/null
+            ./scripts/compose-production up -d --force-recreate caddy </dev/null
+            ./scripts/compose-production restart caddy </dev/null
           else
-            docker compose -f compose.yml pull $targets </dev/null
-            docker compose -f compose.yml up -d --force-recreate $targets </dev/null
+            ./scripts/compose-production pull $targets </dev/null
+            ./scripts/compose-production up -d --force-recreate $targets </dev/null
             if [ "$SERVICE" != "api" ] && [ "$SERVICE" != "all" ]; then
-              docker compose -f compose.yml up -d caddy </dev/null
-              docker compose -f compose.yml restart caddy </dev/null
+              ./scripts/compose-production up -d caddy </dev/null
+              ./scripts/compose-production restart caddy </dev/null
             fi
           fi
 
           verify_running_image() {
             service_name="$1"
             expected_image="$2"
-            container_id="$(docker compose -f compose.yml ps -q "$service_name")"
+            container_id="$(./scripts/compose-production ps -q "$service_name")"
             if [ -z "$container_id" ]; then
               echo "$service_name has no running container after deploy" >&2
               exit 1
@@ -617,9 +626,9 @@ jobs:
           esac
 
           if [ "$SERVICE" = "api" ] || [ "$SERVICE" = "all" ]; then
-            docker compose -f compose.yml exec -T api python manage.py migrate --check </dev/null
-            docker compose -f compose.yml exec -T api python manage.py setup_qdrant </dev/null
-            docker compose -f compose.yml exec -T api python - <<'PY'
+            ./scripts/compose-production exec -T api python manage.py migrate --check </dev/null
+            ./scripts/compose-production exec -T api python manage.py setup_qdrant </dev/null
+            ./scripts/compose-production exec -T api python - <<'PY'
           import urllib.request
 
           request = urllib.request.Request(
@@ -632,8 +641,8 @@ jobs:
                   raise SystemExit(f"Unexpected health response: {response.status} {body}")
           PY
             # Expose the new API only after its private checks have passed.
-            docker compose -f compose.yml up -d caddy </dev/null
-            docker compose -f compose.yml restart caddy </dev/null
+            ./scripts/compose-production up -d caddy </dev/null
+            ./scripts/compose-production restart caddy </dev/null
             verify_running_image caddy ""
           fi
 
@@ -684,7 +693,7 @@ jobs:
           verify_frontend_build fildah-web https://www.fildah.com/build.txt www.fildah.com
           verify_frontend_build index-web https://index.fildah.com/build.txt index.fildah.com
           verify_frontend_build rxchat-web https://rxchat.fildah.com/build.txt rxchat.fildah.com
-          docker compose -f compose.yml ps </dev/null
+          ./scripts/compose-production ps </dev/null
           printf 'Deployed %s from %s at %s\n' "$SERVICE" "$SOURCE_REPO" "$COMMIT_SHA"
           printf '%s %s\n' "$SERVICE" "$COMMIT_SHA" > "$backup_dir/deploy-complete"
           REMOTE

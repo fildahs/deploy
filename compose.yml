@@ -1,3 +1,5 @@
+name: ${COMPOSE_PROJECT_NAME:-deploy}
+
 x-api-secrets: &api-secrets
   SECRET_KEY: ${SECRET_KEY}
   QDRANT_API_KEY: ${QDRANT_API_KEY}
@@ -147,6 +149,18 @@ services:
     restart: unless-stopped
     expose:
       - "80"
+
+  care-web:
+    profiles: [care]
+    image: ${CARE_WEB_IMAGE:-ghcr.io/fildahs/care-web:unconfigured}
+    restart: unless-stopped
+    expose: ["80"]
+
+  business-web:
+    profiles: [business]
+    image: ${BUSINESS_WEB_IMAGE:-ghcr.io/fildahs/business-web:unconfigured}
+    restart: unless-stopped
+    expose: ["3000"]
 
   postgres:
     image: postgres:16-alpine

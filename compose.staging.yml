@@ -1,0 +1,119 @@
+# Standalone staging project: no host ports, no production networks/volumes.
+x-staging-environment: &staging-environment
+  FILDAH_ENVIRONMENT: "${FILDAH_ENVIRONMENT:?Set FILDAH_ENVIRONMENT}"
+  CONSOLE_ENVIRONMENT: "${CONSOLE_ENVIRONMENT:?Set CONSOLE_ENVIRONMENT}"
+  ALLOWED_HOSTS: "${ALLOWED_HOSTS:?Set ALLOWED_HOSTS}"
+  CONSOLE_HOSTS: "${CONSOLE_HOSTS:?Set CONSOLE_HOSTS}"
+  ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:?Set ALLOWED_ORIGINS}"
+  AUTH_ORIGINS: "${AUTH_ORIGINS:?Set AUTH_ORIGINS}"
+  FILDAH_ORIGINS: "${FILDAH_ORIGINS:?Set FILDAH_ORIGINS}"
+  INDEX_ORIGINS: "${INDEX_ORIGINS:?Set INDEX_ORIGINS}"
+  CARE_ORIGINS: "${CARE_ORIGINS:?Set CARE_ORIGINS}"
+  BUSINESS_ORIGINS: "${BUSINESS_ORIGINS:?Set BUSINESS_ORIGINS}"
+  MOBILE_REDIRECT_URIS: ""
+  OPAY_SECRET_KEY: ""
+  OPAY_PUBLIC_KEY: ""
+  OPAY_MERCHANT_ID: ""
+  QDRANT_COLLECTION: "${QDRANT_COLLECTION:-Staging}"
+  QDRANT_MEMORY_COLLECTION: "${QDRANT_MEMORY_COLLECTION:-StagingMemory}"
+  MEDIA_STORAGE_BACKEND: "filesystem"
+
+services:
+  caddy:
+    mem_limit: ${CADDY_MEMORY_LIMIT:-256m}
+    cpus: ${CADDY_CPU_LIMIT:-0.25}
+    networks: !override [default]
+    ports: !reset []
+    volumes:
+      - ./Caddyfile.staging:/etc/caddy/Caddyfile:ro
+    depends_on: !override [api, auth-web, fildah-web, index-web, care-web, business-web]
+    environment:
+      FILDAH_HOSTS: ${FILDAH_HOSTS:?Set FILDAH_HOSTS}
+      AUTH_HOST: ${AUTH_HOST:?Set AUTH_HOST}
+      INDEX_HOST: ${INDEX_HOST:?Set INDEX_HOST}
+      BUSINESS_HOST: ${BUSINESS_HOST:?Set BUSINESS_HOST}
+      CARE_HOST: ${CARE_HOST:?Set CARE_HOST}
+      API_HOST: ${API_HOST:?Set API_HOST}
+      CONSOLE_HOST: ${CONSOLE_HOST:?Set CONSOLE_HOST}
+      CADDY_TRUSTED_PROXIES: ${STAGING_NETWORK_CIDR:?Set STAGING_NETWORK_CIDR}
+      STAGING_PROXY_HEADERS: |
+        header_up X-Forwarded-Proto {http.request.header.X-Forwarded-Proto}
+  api:
+    mem_limit: ${API_MEMORY_LIMIT:-256m}
+    cpus: ${API_CPU_LIMIT:-0.25}
+    networks: !override [default]
+    environment:
+      <<: *staging-environment
+  worker:
+    mem_limit: ${WORKER_MEMORY_LIMIT:-256m}
+    cpus: ${WORKER_CPU_LIMIT:-0.25}
+    networks: !override [default]
+    environment:
+      <<: *staging-environment
+  attachment-worker:
+    mem_limit: ${ATTACHMENT_WORKER_MEMORY_LIMIT:-256m}
+    cpus: ${ATTACHMENT_WORKER_CPU_LIMIT:-0.25}
+    networks: !override [default]
+    environment:
+      <<: *staging-environment
+  billing-beat:
+    mem_limit: ${BILLING_BEAT_MEMORY_LIMIT:-256m}
+    cpus: ${BILLING_BEAT_CPU_LIMIT:-0.25}
+    networks: !override [default]
+    environment:
+      <<: *staging-environment
+  index-web:
+    mem_limit: ${INDEX_WEB_MEMORY_LIMIT:-256m}
+    cpus: ${INDEX_WEB_CPU_LIMIT:-0.25}
+    networks: !override [default]
+    environment:
+      UNDER_CONSTRUCTION: "false"
+      CF_ACCESS_CLIENT_ID: ${CF_ACCESS_CLIENT_ID:-}
+      CF_ACCESS_CLIENT_SECRET: ${CF_ACCESS_CLIENT_SECRET:-}
+  postgres:
+    mem_limit: ${POSTGRES_MEMORY_LIMIT:-256m}
+    cpus: ${POSTGRES_CPU_LIMIT:-0.25}
+    networks: !override [default]
+    ports: !reset []
+  qdrant:
+    mem_limit: ${QDRANT_MEMORY_LIMIT:-256m}
+    cpus: ${QDRANT_CPU_LIMIT:-0.25}
+    networks: !override [default]
+    ports: !reset []
+  cloudflared:
+    mem_limit: ${CLOUDFLARED_MEMORY_LIMIT:-256m}
+    cpus: ${CLOUDFLARED_CPU_LIMIT:-0.25}
+    networks: !override [default]
+    image: cloudflare/cloudflared:2026.10.4
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?Set CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on: [caddy]
+  auth-web:
+    mem_limit: ${AUTH_WEB_MEMORY_LIMIT:-256m}
+    cpus: ${AUTH_WEB_CPU_LIMIT:-0.25}
+    networks: !override [default]
+  fildah-web:
+    mem_limit: ${FILDAH_WEB_MEMORY_LIMIT:-256m}
+    cpus: ${FILDAH_WEB_CPU_LIMIT:-0.25}
+    networks: !override [default]
+  care-web:
+    mem_limit: ${CARE_WEB_MEMORY_LIMIT:-256m}
+    cpus: ${CARE_WEB_CPU_LIMIT:-0.25}
+    networks: !override [default]
+  business-web:
+    mem_limit: ${BUSINESS_WEB_MEMORY_LIMIT:-256m}
+    cpus: ${BUSINESS_WEB_CPU_LIMIT:-0.25}
+    networks: !override [default]
+  redis:
+    mem_limit: ${REDIS_MEMORY_LIMIT:-256m}
+    cpus: ${REDIS_CPU_LIMIT:-0.25}
+    networks: !override [default]
+
+networks:
+  default:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${STAGING_NETWORK_CIDR:?Set STAGING_NETWORK_CIDR}

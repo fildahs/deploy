@@ -4,3 +4,10 @@ compose.local.yml
 *.sql
 qdrant-snapshots/
 command*.md
+
+# Host-only opt-in after standalone RxChat cutover.
+.rxchat-standalone
+
+# Python verification artifacts
+__pycache__/
+*.pyc

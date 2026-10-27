@@ -48,3 +48,9 @@ the application changes, so the production receiver stops accepting old
 automatic dispatches first. Merging requires the owner's approval; this task
 does not itself approve a merge or deployment. Manual workflow controls in
 GitHub require the workflow to exist on the repository's default branch.
+
+## Isolated staging
+
+[Staging runbook](docs/staging.md): bootstrap, manual exact-SHA release,
+rollback, separately approved database restore, and the retained standalone
+RxChat proxy/scheduler requirements before any production rollout.

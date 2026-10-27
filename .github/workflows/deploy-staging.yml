@@ -1,0 +1,158 @@
+name: Deploy Staging
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy_sha:
+        description: Full deploy configuration SHA with successful staging CI
+        required: true
+        type: string
+      api_sha:
+        description: Full API and worker staging SHA
+        required: true
+        type: string
+      auth_sha:
+        description: Full Auth staging SHA
+        required: true
+        type: string
+      care_sha:
+        description: Full Care staging SHA
+        required: true
+        type: string
+      business_sha:
+        description: Full Business staging SHA
+        required: true
+        type: string
+      index_sha:
+        description: Full Index staging SHA
+        required: true
+        type: string
+      fildah_sha:
+        description: Full marketing/account staging SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+    environment: staging
+    env:
+      DEPLOY_SHA: ${{ inputs.deploy_sha }}
+      API_SHA: ${{ inputs.api_sha }}
+      AUTH_SHA: ${{ inputs.auth_sha }}
+      CARE_SHA: ${{ inputs.care_sha }}
+      BUSINESS_SHA: ${{ inputs.business_sha }}
+      INDEX_SHA: ${{ inputs.index_sha }}
+      FILDAH_SHA: ${{ inputs.fildah_sha }}
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+      GHCR_READ_USER: ${{ secrets.GHCR_READ_USER }}
+      GHCR_READ_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
+      BACKUP_ID: staging-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.deploy_sha }}
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ secrets.GHCR_READ_USER }}
+          password: ${{ secrets.GHCR_READ_TOKEN }}
+      - name: Require exact staging CI, publish jobs and image manifests before SSH
+        env:
+          CI_READ_TOKEN: ${{ secrets.DEPLOY_REPO_DISPATCH_TOKEN || github.token }}
+        run: |
+          export CHECKED_OUT_SHA="$(git rev-parse HEAD)"
+          python3 scripts/require_staging_ci.py
+      - name: Configure SSH after the release gate
+        run: |
+          set -eu
+          test -n "$VPS_HOST"
+          test -n "$VPS_USER"
+          test -n "$SSH_KEY"
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" | tr -d '\r' > ~/.ssh/staging
+          chmod 600 ~/.ssh/staging
+          ssh-keyscan -T 20 -t ed25519 -H "$VPS_HOST" >> ~/.ssh/known_hosts
+      - name: Back up existing staging database before syncing files
+        run: |
+          ssh -i ~/.ssh/staging -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" \
+            BACKUP_ID="$BACKUP_ID" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          cd /srv/fildah/staging
+          test "$(pwd -P)" = /srv/fildah/staging
+          test "$(pwd -P)" != /srv/fildah/deploy
+          test "$(pwd -P)" != /srv/fildah/production
+          [[ "$BACKUP_ID" =~ ^staging-[0-9]+-[0-9]+$ ]]
+          umask 077
+          backup="/srv/fildah/backups/staging/$BACKUP_ID"
+          mkdir -p "$backup"
+          docker ps -q --filter label=com.docker.compose.project=deploy | sort > "$backup/production-containers.before"
+          ids="$(docker ps -q --filter label=com.docker.compose.project=staging --filter label=com.docker.compose.service=postgres)"
+          if [ -n "$ids" ]; then
+            test "$(printf '%s\n' "$ids" | wc -l)" -eq 1
+            docker exec "$ids" sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > "$backup/database.dump"
+            test -s "$backup/database.dump"
+          else
+            test -z "$(docker volume ls -q --filter label=com.docker.compose.project=staging)"
+            printf '%s\n' 'First bootstrap: no existing staging database or volumes.' > "$backup/first-bootstrap"
+          fi
+          if [ -f .release ]; then cp -p .release "$backup/release"; fi
+          REMOTE
+      - name: Sync staging configuration without environment files or deletion
+        run: |
+          rsync -az --exclude='.git/' --exclude='.env' --exclude='staging/' \
+            --exclude='.release*' --exclude='staging.release' \
+            -e 'ssh -i ~/.ssh/staging -o BatchMode=yes -o StrictHostKeyChecking=yes' \
+            ./ "$VPS_USER@$VPS_HOST:/srv/fildah/staging/"
+          scp -i ~/.ssh/staging -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            staging.release "$VPS_USER@$VPS_HOST:/srv/fildah/staging/.release.next"
+      - name: Pull, migrate and start only project staging
+        run: |
+          ssh -i ~/.ssh/staging -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" BACKUP_ID="$BACKUP_ID" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          cd /srv/fildah/staging
+          test "$(pwd -P)" = /srv/fildah/staging
+          test "$(pwd -P)" != /srv/fildah/deploy
+          test "$(pwd -P)" != /srv/fildah/production
+          test -f .env
+          test -f .release.next
+          chmod 600 .release.next
+          if [ -f .release ] && ! cmp -s .release .release.next; then cp -p .release .release.previous; fi
+          mv .release.next .release
+          compose=(docker compose -p staging -f compose.yml -f compose.staging.yml --env-file .env --env-file .release)
+          "${compose[@]}" config --format json | python3 scripts/assert_staging.py
+          "${compose[@]}" pull
+          "${compose[@]}" up -d postgres redis qdrant
+          for attempt in $(seq 1 30); do
+            if "${compose[@]}" exec -T postgres sh -c 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"' >/dev/null; then break; fi
+            sleep 2
+          done
+          "${compose[@]}" run --rm --no-deps api python manage.py migrate --noinput
+          "${compose[@]}" run --rm --no-deps api python manage.py sync_platform_settings
+          "${compose[@]}" up -d
+          healthy=0
+          for attempt in $(seq 1 30); do
+            if "${compose[@]}" exec -T api python -c 'import urllib.request; r=urllib.request.Request("http://127.0.0.1:8000/health/",headers={"Host":"fsandcube-api.fildah.com","X-Forwarded-Proto":"https"}); urllib.request.urlopen(r,timeout=5).read()'; then healthy=1; break; fi
+            sleep 2
+          done
+          test "$healthy" = 1
+          "${compose[@]}" exec -T index-web node -e 'fetch("http://127.0.0.1:3000/build.txt").then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))'
+          "${compose[@]}" exec -T business-web node -e 'fetch("http://127.0.0.1:3000/build.txt").then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))'
+          "${compose[@]}" ps
+          # Read-only production status; no production configuration is loaded or changed.
+          docker compose -p deploy ps
+          diff -u "/srv/fildah/backups/staging/$BACKUP_ID/production-containers.before" <(docker ps -q --filter label=com.docker.compose.project=deploy | sort)
+          REMOTE

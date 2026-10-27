@@ -41,8 +41,8 @@ def release_target(env):
     return repo, sha
 
 
-def require_successful_ci(repo, sha, token, fetch):
-    query = urllib.parse.urlencode({"head_sha": sha, "branch": "main", "per_page": 100})
+def require_successful_ci(repo, sha, token, fetch, *, branch="main"):
+    query = urllib.parse.urlencode({"head_sha": sha, "branch": branch, "per_page": 100})
     url = f"https://api.github.com/repos/{repo}/actions/workflows/ci.yml/runs?{query}"
     request = urllib.request.Request(url, headers={
         "Accept": "application/vnd.github+json",
@@ -54,13 +54,14 @@ def require_successful_ci(repo, sha, token, fetch):
     # Do not use an older success to bypass a newer failure or unfinished run.
     runs = [run for run in runs if (
         run.get("head_sha") == sha
-        and run.get("head_branch") == "main"
+        and run.get("head_branch") == branch
         and run.get("event") in {"push", "workflow_dispatch"}
         and run.get("head_repository", {}).get("full_name") == repo
     )]
     latest = max(runs, key=lambda run: (run["run_number"], run.get("run_attempt", 1)), default=None)
     if not latest or latest.get("status") != "completed" or latest.get("conclusion") != "success":
         raise ValueError(f"Successful CI is required for {repo}@{sha}; run CI and wait for it to pass.")
+    return latest
 
 
 def main():
