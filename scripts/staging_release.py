@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Local staging gates, reproducible image publication and digest-pinned release.
+"""Local staging gates and committed-only images for direct SSH transfer.
 
-No command connects to the VPS or loads runtime environment files. Publishing
-is an explicit operator step after owner approval; `plan` has no network calls.
+No command connects to the VPS, publishes images or loads runtime env files.
 """
 import argparse
 import hashlib
@@ -157,9 +156,10 @@ def require_receipt(directory, sources):
 
 def build_commands(sources, context):
     for variable, (repo, package, target) in IMAGES.items():
-        tag = f'ghcr.io/fildahs/{package}:staging-{sources[repo]}'
-        args = ['docker', 'buildx', 'build', '--platform', 'linux/amd64', '--push',
-                '--tag', tag, '--label', f'org.opencontainers.image.revision={sources[repo]}',
+        tag = f'fildah-staging/{package}:current'
+        args = ['docker', 'buildx', 'build', '--platform', 'linux/amd64', '--load',
+                '--tag', tag, '--label', 'com.fildah.environment=staging',
+                '--label', f'org.opencontainers.image.revision={sources[repo]}',
                 '--build-arg', f'APP_BUILD_SHA={sources[repo]}']
         if target:
             args.extend(['--target', target])
@@ -174,7 +174,7 @@ def build_commands(sources, context):
         yield variable, tag, args
 
 
-def publish(directory):
+def build(directory):
     sources = select(require_pushed=True)
     require_receipt(directory, sources)
     if not os.environ.get('UI_BUILD_TOKEN'):
@@ -193,18 +193,16 @@ def publish(directory):
             with tarfile.open(archive) as source:
                 source.extractall(dest, filter='data')
         for variable, tag, args in build_commands(sources, context):
-            print(f'Building and publishing {tag}', flush=True)
-            metadata = context / 'metadata.json'
-            subprocess.run(args[:-1] + ['--metadata-file', str(metadata), args[-1]], check=True)
-            digest = json.loads(metadata.read_text())['containerimage.digest']
-            if not re.fullmatch(r'sha256:[0-9a-f]{64}', digest):
-                raise ValueError('Registry returned an invalid digest')
-            # Inspect by digest, not the mutable tag, before writing the release.
-            pinned = tag + '@' + digest
-            subprocess.run(['docker', 'buildx', 'imagetools', 'inspect', pinned], check=True, stdout=subprocess.DEVNULL)
-            release[variable] = pinned
+            print(f'Building locally {tag}', flush=True)
+            subprocess.run(args, check=True)
+            info = json.loads(run(['docker', 'image', 'inspect', tag]))[0]
+            if (not re.fullmatch(r'sha256:[0-9a-f]{64}', info['Id']) or
+                    info['Config'].get('Labels', {}).get('org.opencontainers.image.revision') != sources[IMAGES[variable][0]]):
+                raise ValueError('Local image identity or source revision mismatch')
+            release[variable] = tag
+            release[variable + '_ID'] = info['Id']
         if select(require_pushed=True) != sources or fingerprint() != json.loads((directory / 'gates.json').read_text())['makefile_sha256']:
-            raise ValueError('Sources changed during publication; no release file written')
+            raise ValueError('Sources changed during build; no release file written')
         bundle = directory / f'deploy-{sources["deploy"]}.tar'
         # Include only runtime/operator code; no secrets, generated files or .git.
         subprocess.run(['git', 'archive', '-o', str(bundle), sources['deploy'], 'compose.yml',
@@ -216,14 +214,14 @@ def publish(directory):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=('plan', 'gate', 'publish'))
+    parser.add_argument('action', choices=('plan', 'gate', 'build'))
     parser.add_argument('--output', type=Path, default=ROOT / '.local/staging-test-1/release')
     args = parser.parse_args()
     directory = args.output.resolve()
     if args.action == 'gate':
         gate(directory)
-    elif args.action == 'publish':
-        publish(directory)
+    elif args.action == 'build':
+        build(directory)
     else:
         sources = select()
         print(json.dumps({'sources': sources, 'build_urls': URLS, 'commands':

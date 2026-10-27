@@ -11,6 +11,9 @@ def assert_staging(config):
         assert not service.get('ports'), f'{name}: host ports forbidden'
         assert service.get('mem_limit') and float(service.get('cpus', 0)) > 0, f'{name}: resource limits required'
         assert set(service.get('networks', {})) == {'default'}, f'{name}: foreign network forbidden'
+        if name in {'api', 'worker', 'attachment-worker', 'billing-beat', 'auth-web', 'care-web', 'fildah-web', 'index-web', 'business-web'}:
+            assert service.get('pull_policy') == 'never', f'{name}: application image pulls forbidden'
+            assert service['image'].startswith('fildah-staging/') and service['image'].endswith(':current'), f'{name}: local staging image required'
         for mount in service.get('volumes', []):
             if mount.get('type') == 'bind':
                 assert mount['source'].endswith('/Caddyfile.staging'), f'{name}: unexpected bind mount'

@@ -20,12 +20,13 @@ class LocalStagingReleaseTests(unittest.TestCase):
         builds = list(release.build_commands(selected, Path('/export')))
         self.assertEqual(len(builds), 7)
         for variable, tag, args in builds:
-            self.assertTrue(tag.endswith(':staging-' + 'a' * 40))
-            self.assertIn('--push', args)
+            self.assertTrue(tag.startswith('fildah-staging/') and tag.endswith(':current'))
+            self.assertIn('--load', args)
+            self.assertNotIn('--push', args)
             self.assertIn('linux/amd64', args)
             self.assertNotIn('CF_ACCESS_CLIENT_SECRET', ' '.join(args))
         care = next(args for name, _, args in builds if name == 'CARE_WEB_IMAGE')
-        self.assertIn('ghcr.io/fildahs/care-web:staging-' + 'a' * 40, care)
+        self.assertIn('fildah-staging/care-web:current', care)
         self.assertIn('UNDER_CONSTRUCTION=false', care)
         for value in release.URLS.values():
             self.assertTrue(value.startswith('https://fsandcube-'))
@@ -120,24 +121,35 @@ class ReleaseValidationTests(unittest.TestCase):
                 archive.addfile(extra)
         data = {key: 'a'*40 for key in release.SHA_KEYS.values()}
         for variable, (_, package, _) in release.IMAGES.items():
-            data[variable] = f'ghcr.io/fildahs/{package}:staging-' + 'a'*40 + '@sha256:' + 'b'*64
+            data[variable] = f'fildah-staging/{package}:current'
+            data[variable + '_ID'] = 'sha256:' + 'b'*64
         data['CONFIG_SHA256'] = hashlib.sha256(bundle.read_bytes()).hexdigest()
         manifest.write_text(''.join(f'{key}={value}\n' for key, value in data.items()))
         return bundle, manifest
 
-    def test_accepts_pinned_images_and_matching_config(self):
+    def test_accepts_local_images_and_matching_config(self):
         with tempfile.TemporaryDirectory() as temp:
             validate(*self.artifact(Path(temp)))
 
-    def test_refuses_production_mutable_or_mismatched_images_and_duplicate_fields(self):
+    def test_refuses_foreign_images_invalid_ids_and_duplicate_fields(self):
         with tempfile.TemporaryDirectory() as temp:
             bundle, manifest = self.artifact(Path(temp))
             valid = manifest.read_text()
-            changes = [valid.replace('ghcr.io', 'ghcrXio', 1), valid.replace(':staging-', ':main-', 1), valid.replace('@sha256:'+'b'*64, '', 1), valid.replace('API_SHA='+'a'*40, 'API_SHA='+'c'*40), valid+'API_SHA='+'a'*40+'\n', valid.replace('CONFIG_SHA256=', 'UNKNOWN=')]
+            changes = [valid.replace('fildah-staging/', 'ghcr.io/fildahs/', 1), valid.replace(':current', ':main', 1), valid.replace('sha256:'+'b'*64, 'invalid', 1), valid+'API_SHA='+'a'*40+'\n', valid.replace('CONFIG_SHA256=', 'UNKNOWN=')]
             for content in changes:
                 manifest.write_text(content)
                 with self.subTest(content=content[:20]), self.assertRaises(SystemExit):
                     validate(bundle, manifest)
+
+    def test_loaded_image_checks_require_exact_id_and_source_revision(self):
+        with tempfile.TemporaryDirectory() as temp:
+            bundle, manifest = self.artifact(Path(temp))
+            info = {'Id': 'sha256:'+'b'*64, 'Config': {'Labels': {'org.opencontainers.image.revision': 'a'*40}}}
+            with patch('scripts.validate_staging_release.subprocess.check_output', return_value=json.dumps([info])):
+                validate(bundle, manifest, check_images=True)
+            for changed in [{**info, 'Id': 'sha256:'+'c'*64}, {**info, 'Config': {'Labels': {'org.opencontainers.image.revision': 'c'*40}}}]:
+                with self.subTest(changed=changed), patch('scripts.validate_staging_release.subprocess.check_output', return_value=json.dumps([changed])), self.assertRaises(SystemExit):
+                    validate(bundle, manifest, check_images=True)
 
     def test_refuses_changed_archive_traversal_and_symlinks(self):
         with tempfile.TemporaryDirectory() as temp:

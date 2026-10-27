@@ -38,7 +38,8 @@ class ComposeCompatibilityTests(unittest.TestCase):
         data = config(ROOT / 'compose.yml', ROOT / 'compose.staging.yml', staging=True)
         assert_staging(data)
         self.assertTrue(any(mount['source'].endswith('/Caddyfile.staging') for mount in data['services']['caddy']['volumes']))
-        for key, changed in [('ports', ['80:80']), ('networks', {'foreign-network': None}), ('mem_limit', 0)]:
+        for key, changed in [('ports', ['80:80']), ('networks', {'foreign-network': None}), ('mem_limit', 0),
+                             ('pull_policy', 'always'), ('image', 'ghcr.io/fildahs/fildah-api:main')]:
             bad = copy.deepcopy(data)
             bad['services']['api'][key] = changed
             with self.subTest(key=key), self.assertRaises(AssertionError):

@@ -9,17 +9,18 @@ host-managed `.env`. Never commit the real credentials.
 
 Staging is verified and built locally: from the workspace root use
 `make staging-plan`, `make staging-gate`, then the owner-approved
-`make staging-publish`. Images go to GHCR and rollout is manual over approved
+`make staging-build`. Images are loaded locally and streamed to the VPS with
+`docker save | ssh docker load`; rollout is manual over approved
 SSH. Source/deploy CI jobs run only on `main`; staging uses no Actions gate.
 See [the staging runbook](docs/staging.md) for receipts, runtime setup,
-backups, digest-pinned rollout and rollback.
+data backups, image-ID verification and direct transfer.
 
 When production deployment is ready and approved:
 
 1. Run the source repository's **CI** workflow manually on `main`, enabling
    **publish_images**. This runs checks first, then builds and publishes
    images tagged with that exact commit SHA. Leave this option off for checks
-   alone. Staging image publication/rollout remains part of the staging setup.
+   alone. Staging uses its separate local-build/direct-transfer procedure.
 2. Wait for successful CI on both the application release and the selected
    deploy-repository `main` commit. If needed, run deploy **CI** manually.
 3. In this repository choose **Actions → Deploy Production → Run workflow**,

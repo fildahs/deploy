@@ -39,6 +39,7 @@ services:
       STAGING_PROXY_HEADERS: |
         header_up X-Forwarded-Proto {http.request.header.X-Forwarded-Proto}
   api:
+    pull_policy: never
     mem_limit: ${API_MEMORY_LIMIT:-256m}
     cpus: ${API_CPU_LIMIT:-0.25}
     networks: !override [default]
@@ -47,24 +48,28 @@ services:
       GUNICORN_WORKERS: "1"
       GUNICORN_THREADS: "4"
   worker:
+    pull_policy: never
     mem_limit: ${WORKER_MEMORY_LIMIT:-256m}
     cpus: ${WORKER_CPU_LIMIT:-0.25}
     networks: !override [default]
     environment:
       <<: *staging-environment
   attachment-worker:
+    pull_policy: never
     mem_limit: ${ATTACHMENT_WORKER_MEMORY_LIMIT:-256m}
     cpus: ${ATTACHMENT_WORKER_CPU_LIMIT:-0.25}
     networks: !override [default]
     environment:
       <<: *staging-environment
   billing-beat:
+    pull_policy: never
     mem_limit: ${BILLING_BEAT_MEMORY_LIMIT:-256m}
     cpus: ${BILLING_BEAT_CPU_LIMIT:-0.25}
     networks: !override [default]
     environment:
       <<: *staging-environment
   index-web:
+    pull_policy: never
     mem_limit: ${INDEX_WEB_MEMORY_LIMIT:-256m}
     cpus: ${INDEX_WEB_CPU_LIMIT:-0.25}
     networks: !override [default]
@@ -93,18 +98,22 @@ services:
       TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?Set CLOUDFLARE_TUNNEL_TOKEN}
     depends_on: [caddy]
   auth-web:
+    pull_policy: never
     mem_limit: ${AUTH_WEB_MEMORY_LIMIT:-256m}
     cpus: ${AUTH_WEB_CPU_LIMIT:-0.25}
     networks: !override [default]
   fildah-web:
+    pull_policy: never
     mem_limit: ${FILDAH_WEB_MEMORY_LIMIT:-256m}
     cpus: ${FILDAH_WEB_CPU_LIMIT:-0.25}
     networks: !override [default]
   care-web:
+    pull_policy: never
     mem_limit: ${CARE_WEB_MEMORY_LIMIT:-256m}
     cpus: ${CARE_WEB_CPU_LIMIT:-0.25}
     networks: !override [default]
   business-web:
+    pull_policy: never
     mem_limit: ${BUSINESS_WEB_MEMORY_LIMIT:-256m}
     cpus: ${BUSINESS_WEB_CPU_LIMIT:-0.25}
     networks: !override [default]
