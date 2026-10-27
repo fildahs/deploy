@@ -57,8 +57,10 @@ if [[ -n "$ids" ]]; then
       --entrypoint tar postgres:16-alpine -C /data -cf - . > "$backup/$volume.tar"
   done < <(docker volume ls -q --filter label=com.docker.compose.project=staging)
 else
-  test -z "$(docker ps -aq --filter label=com.docker.compose.project=staging)"
-  test -z "$(docker volume ls -q --filter label=com.docker.compose.project=staging)"
+  if [[ -n "$(docker ps -aq --filter label=com.docker.compose.project=staging)" || -n "$(docker volume ls -q --filter label=com.docker.compose.project=staging)" ]]; then
+    echo 'Staging exists but postgres is not running; inspect the existing stack before retrying.' >&2
+    exit 1
+  fi
   echo 'First bootstrap: no existing staging containers or volumes' > "$backup/first-bootstrap"
 fi
 # Failure leaves the backup and quiesced staging services for investigation.
@@ -105,4 +107,7 @@ if {r['Service'] for r in rows} != required or any(r['State'] != 'running' or r.
 PY
 snapshot_production > "$backup/production.after"
 diff -u "$backup/production.before" "$backup/production.after"
+# Retain the exact successful release pair independently of upload cleanup.
+install -m 600 "$bundle" "$backup/config.tar"
+install -m 600 "$release" "$backup/staging.release"
 echo "Staging rollout complete; backup: $backup. Seven-host browser/provider checks still required."

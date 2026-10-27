@@ -136,7 +136,9 @@ host-key checking or trust an unverified `ssh-keyscan` result.
 5. Install the reviewed config/release, pull pinned images, start stores,
    migrate, sync platform settings and start staging. Verify API health,
    exact frontend build SHAs, worker pings, all 14 running services, no
-   published ports, and unchanged non-staging IDs/start timestamps.
+   published ports, and unchanged non-staging IDs/start timestamps. Each
+   successful rollout retains its exact `config.tar` and `staging.release`
+   in the reported backup directory, independently of the upload directory.
    A failure leaves backups and any stopped staging services for investigation;
    there is no automatic restore, volume deletion or production action.
 6. Create the owner's staging superuser interactively if needed; configure
@@ -165,7 +167,8 @@ A worker ping or health endpoint alone does not prove those flows.
 Business remains an unfinished routing scaffold.
 
 For image rollback, review migration compatibility first; newer data remains.
-Use the retained previous config archive and digest-pinned release, rerun the
+Use `config.tar` and `staging.release` from the previous successful rollout's
+backup directory (the pair describes that rollout, not its pre-rollout state), rerun the
 same approved rollout procedure and take another backup. `.release.previous`
 alone does not restore an older Compose config. Never assume an older image
 can read a newly migrated database.
