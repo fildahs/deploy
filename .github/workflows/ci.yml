@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  configuration:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Test deployment authorization and CI gate
+        run: python3 -m unittest discover -s tests -v
+      - name: Validate production Compose configuration without secrets
+        env:
+          SECRET_KEY: placeholder
+          QDRANT_API_KEY: placeholder
+          POSTGRES_PASSWORD: placeholder
+          FILDAH_API_IMAGE: example.invalid/fildah-api:verified
+          FILDAH_WORKER_IMAGE: example.invalid/fildah-worker:verified
+        run: docker compose --env-file /dev/null -f compose.yml config --quiet
