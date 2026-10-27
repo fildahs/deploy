@@ -12,7 +12,6 @@ SERVICE_REPOS = {
     "auth-web": "fildahs/auth-web",
     "fildah-web": "fildahs/fildah-web",
     "index-web": "fildahs/index-web",
-    "rxchat-web": "fildahs/care-web",
 }
 
 

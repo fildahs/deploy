@@ -19,7 +19,6 @@ on:
           - caddy
           - fildah-web
           - index-web
-          - rxchat-web
       image_tag:
         description: Image tag to deploy for one-service rollbacks, for example a commit SHA
         required: false
@@ -73,7 +72,7 @@ jobs:
         run: |
           set -eu
           case "$SERVICE" in
-            preflight|api|auth-web|caddy|fildah-web|index-web|rxchat-web) ;;
+            preflight|api|auth-web|caddy|fildah-web|index-web) ;;
             *) echo "Unknown service: $SERVICE" >&2; exit 1 ;;
           esac
           if [ "$SERVICE" = "all" ] || [ "$SERVICE" = "caddy" ] || [ "$SERVICE" = "preflight" ]; then
@@ -92,7 +91,6 @@ jobs:
             auth-web) package="auth-web" ;;
             fildah-web) package="fildah-web" ;;
             index-web) package="index-web" ;;
-            rxchat-web) package="rxchat-web" ;;
           esac
           IMAGE="ghcr.io/fildahs/${package}:${IMAGE_TAG}"
           printf 'IMAGE=%s\n' "$IMAGE" >> "$GITHUB_ENV"
@@ -126,14 +124,6 @@ jobs:
             -o StrictHostKeyChecking=yes \
             -o ConnectTimeout=20 \
             "$VPS_USER@$VPS_HOST" "true"
-
-      - name: Require review of retained standalone RxChat production overrides
-        run: |
-          ssh -4 -i ~/.ssh/fildah_vps -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 \
-            "$VPS_USER@$VPS_HOST" 'test ! -x /srv/rxchat-open/production-proxy' || {
-              echo 'Production rollout blocked: integrate the retained RxChat proxy and scheduler overrides before this workflow can modify production.' >&2
-              exit 1
-            }
 
       - name: Read-only production preflight
         if: env.SERVICE == 'preflight'
@@ -180,7 +170,7 @@ jobs:
             'psql -X -U "${POSTGRES_USER:-fildah}" -d "${POSTGRES_DB:-fildah}" -At -v ON_ERROR_STOP=1' <<'SQL'
           SELECT 'database_bytes', pg_database_size(current_database());
           SELECT 'applied_migration', app, max(name) FROM django_migrations
-            WHERE app IN ('billing','care','chat','rxchat','identity') GROUP BY app ORDER BY app;
+            WHERE app IN ('billing','care','chat','identity') GROUP BY app ORDER BY app;
           SELECT 'provider_plans', provider, billing_cycle, count(*),
             count(*) FILTER (WHERE is_active) FROM billing_providerplan
             GROUP BY provider, billing_cycle ORDER BY provider, billing_cycle;
@@ -259,7 +249,6 @@ jobs:
             --filter=':- .gitignore' \
             --exclude='.git/' \
             --exclude='.env' \
-            --exclude='.rxchat-standalone' \
             -e "ssh $ssh_opts" \
             ./ "$VPS_USER@$VPS_HOST:/srv/fildah/deploy/"
 
@@ -355,11 +344,8 @@ jobs:
             index-web)
               targets="index-web"
               ;;
-            rxchat-web)
-              targets="rxchat-web"
-              ;;
             all)
-              targets="api worker attachment-worker billing-beat auth-web fildah-web index-web rxchat-web"
+              targets="api worker attachment-worker billing-beat auth-web fildah-web index-web"
               ;;
           esac
 
@@ -569,9 +555,6 @@ jobs:
             index-web)
               set_image_var INDEX_WEB_IMAGE "$IMAGE"
               ;;
-            rxchat-web)
-              set_image_var RXCHAT_WEB_IMAGE "$IMAGE"
-              ;;
           esac
 
           if [ "$SERVICE" = "api" ] || [ "$SERVICE" = "all" ]; then
@@ -616,11 +599,11 @@ jobs:
               verify_running_image billing-beat "$worker_image"
               ;;
             all)
-              for service_name in api worker attachment-worker billing-beat auth-web fildah-web index-web rxchat-web; do
+              for service_name in api worker attachment-worker billing-beat auth-web fildah-web index-web; do
                 verify_running_image "$service_name" ""
               done
               ;;
-            auth-web|fildah-web|index-web|rxchat-web)
+            auth-web|fildah-web|index-web)
               verify_running_image "$SERVICE" "$IMAGE"
               ;;
           esac
@@ -667,11 +650,9 @@ jobs:
             auth-web) wait_for_url HEAD https://auth.fildah.com ;;
             fildah-web) wait_for_url HEAD https://www.fildah.com ;;
             index-web) wait_for_url HEAD https://index.fildah.com ;;
-            rxchat-web) wait_for_url HEAD https://rxchat.fildah.com ;;
             caddy|all)
               wait_for_url HEAD https://auth.fildah.com
               wait_for_url HEAD https://www.fildah.com
-              wait_for_url HEAD https://rxchat.fildah.com
               ;;
           esac
 
@@ -692,7 +673,6 @@ jobs:
           verify_frontend_build auth-web https://auth.fildah.com/build.txt auth.fildah.com
           verify_frontend_build fildah-web https://www.fildah.com/build.txt www.fildah.com
           verify_frontend_build index-web https://index.fildah.com/build.txt index.fildah.com
-          verify_frontend_build rxchat-web https://rxchat.fildah.com/build.txt rxchat.fildah.com
           ./scripts/compose-production ps </dev/null
           printf 'Deployed %s from %s at %s\n' "$SERVICE" "$SOURCE_REPO" "$COMMIT_SHA"
           printf '%s %s\n' "$SERVICE" "$COMMIT_SHA" > "$backup_dir/deploy-complete"
@@ -725,7 +705,6 @@ jobs:
               "auth-web": "auth-web",
               "fildah-web": "fildah-web",
               "index-web": "index-web",
-              "rxchat-web": "rxchat-web",
           }
           service = os.environ["SERVICE"]
           image = os.environ.get("IMAGE", "")

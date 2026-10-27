@@ -33,11 +33,13 @@
 	reverse_proxy index-web:3000
 }
 
-{$RXCHAT_HOST:rxchat.fildah.com} {
+rxchat.fildah.com {
 	encode zstd gzip
-	# Empty defaults preserve the current production route until cutover.
-	reverse_proxy {$RXCHAT_UPSTREAM:rxchat-web:80} {
-		{$RXCHAT_PROXY_HEADERS}
+	reverse_proxy rxchat-web:80 {
+		flush_interval -1
+		header_up X-Real-IP {client_ip}
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Forwarded-Host {host}
 	}
 }
 
