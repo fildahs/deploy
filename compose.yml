@@ -1,3 +1,5 @@
+name: ${COMPOSE_PROJECT_NAME:-deploy}
+
 x-api-secrets: &api-secrets
   SECRET_KEY: ${SECRET_KEY}
   QDRANT_API_KEY: ${QDRANT_API_KEY}
@@ -7,7 +9,6 @@ x-api-secrets: &api-secrets
   BREVO_API_KEY: ${BREVO_API_KEY:-}
   GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
   GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
-  OPENFDA_API_KEY: ${OPENFDA_API_KEY:-}
   PAYSTACK_SECRET_KEY: ${PAYSTACK_SECRET_KEY:-}
   PAYSTACK_PUBLIC_KEY: ${PAYSTACK_PUBLIC_KEY:-}
   OPAY_SECRET_KEY: ${OPAY_SECRET_KEY:-}
@@ -34,8 +35,7 @@ services:
       - api
       - auth-web
       - fildah-web
-      - healthscout-web
-      - rxchat-web
+      - index-web
 
   api:
     image: ${FILDAH_API_IMAGE:-ghcr.io/fildahs/fildah-api:main}
@@ -44,11 +44,11 @@ services:
       <<: *api-secrets
       DEBUG: "False"
       ALLOWED_HOSTS: api.fildah.com,console.fildah.com
-      ALLOWED_ORIGINS: https://auth.fildah.com,https://www.fildah.com,https://healthscout.fildah.com,https://rxchat.fildah.com
+      ALLOWED_ORIGINS: https://auth.fildah.com,https://www.fildah.com,https://index.fildah.com,https://console.fildah.com,https://api.fildah.com
       AUTH_ORIGINS: https://auth.fildah.com
       FILDAH_ORIGINS: https://www.fildah.com
-      HEALTHSCOUT_ORIGINS: https://healthscout.fildah.com
-      RXCHAT_ORIGINS: https://rxchat.fildah.com
+      INDEX_ORIGINS: https://index.fildah.com
+      CARE_ORIGINS: ""
       DATABASE_URL: postgres://${POSTGRES_USER:-fildah}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-fildah}
       DATABASE_SSL_REQUIRE: "False"
       QDRANT_URL: http://qdrant:6333
@@ -134,17 +134,26 @@ services:
     expose:
       - "80"
 
-  healthscout-web:
-    image: ${HEALTHSCOUT_WEB_IMAGE:-ghcr.io/fildahs/healthscout-web:main}
+  # Node, not nginx: public pages render on the server (index-1 Slice 4).
+  index-web:
+    image: ${INDEX_WEB_IMAGE:-ghcr.io/fildahs/index-web:main}
+    environment:
+      UNDER_CONSTRUCTION: ${INDEX_UNDER_CONSTRUCTION:-true}
     restart: unless-stopped
     expose:
-      - "80"
+      - "3000"
 
-  rxchat-web:
-    image: ${RXCHAT_WEB_IMAGE:-ghcr.io/fildahs/rxchat-web:main}
+  care-web:
+    profiles: [care]
+    image: ${CARE_WEB_IMAGE:-ghcr.io/fildahs/care-web:unconfigured}
     restart: unless-stopped
-    expose:
-      - "80"
+    expose: ["80"]
+
+  business-web:
+    profiles: [business]
+    image: ${BUSINESS_WEB_IMAGE:-ghcr.io/fildahs/business-web:unconfigured}
+    restart: unless-stopped
+    expose: ["3000"]
 
   postgres:
     image: postgres:16-alpine

@@ -1,0 +1,123 @@
+#!/usr/bin/env bash
+# Execute ON THE VPS only after owner approval, from /srv/fildah/staging.
+# Arguments: absolute path to uploaded config tar, absolute release file path.
+set -euo pipefail
+umask 077
+[[ $# = 2 ]] || { echo 'Usage: rollout-staging CONFIG_TAR RELEASE_FILE' >&2; exit 2; }
+[[ "$(pwd -P)" = /srv/fildah/staging ]] || { echo 'Wrong staging directory' >&2; exit 1; }
+exec 9>.rollout.lock
+flock -n 9 || { echo 'Another staging rollout is running' >&2; exit 1; }
+test -f .env
+test ! -L .env
+chmod 600 .env
+bundle="$(realpath "$1")"
+release="$(realpath "$2")"
+export DOCKER_HOST=unix:///var/run/docker.sock
+unset DOCKER_CONTEXT
+compose_env=(env -i PATH="$PATH" HOME="$HOME" DOCKER_HOST="$DOCKER_HOST")
+if [[ -n "${DOCKER_CONFIG:-}" ]]; then compose_env+=(DOCKER_CONFIG="$DOCKER_CONFIG"); fi
+# Validate everything BEFORE backup, extraction, compose or loading a release.
+python3 "$(dirname "${BASH_SOURCE[0]}")/validate_staging_release.py" "$bundle" "$release" --check-images
+mkdir -p /srv/fildah/backups/staging
+candidate="$(mktemp -d /srv/fildah/staging/.candidate-XXXXXXXX)"
+trap 'rm -rf "$candidate"' EXIT
+tar -xf "$bundle" --no-same-owner -C "$candidate"
+"${compose_env[@]}" docker compose -p staging --project-directory "$candidate" -f "$candidate/compose.yml" -f "$candidate/compose.staging.yml" --env-file /srv/fildah/staging/.env --env-file "$release" config --format json | python3 "$candidate/scripts/assert_staging.py"
+backup="$(mktemp -d /srv/fildah/backups/staging/rollout-XXXXXXXX)"
+# Capture ALL production containers (including stopped) and start timestamps.
+snapshot_production() {
+  local ids
+  ids="$(docker ps -aq)"
+  if [[ -n "$ids" ]]; then
+    docker inspect $ids --format '{{if ne (index .Config.Labels "com.docker.compose.project") "staging"}}{{.Id}} {{.State.Status}} {{.State.StartedAt}}{{end}}' | sed '/^$/d' | sort
+  fi
+}
+snapshot_production > "$backup/production.before"
+# Owner chose rebuild/redeploy for staging; retain data backups, no image history.
+ids="$(docker ps -q --filter label=com.docker.compose.project=staging --filter label=com.docker.compose.service=postgres)"
+if [[ -n "$ids" ]]; then
+  [[ "$(printf '%s\n' "$ids" | wc -l)" = 1 ]]
+  # Quiesce staging writers using labels, never a production Compose file.
+  writers="$(for service in api worker attachment-worker billing-beat; do docker ps -q --filter label=com.docker.compose.project=staging --filter "label=com.docker.compose.service=$service"; done)"
+  if [[ -n "$writers" ]]; then docker stop $writers > /dev/null; fi
+  docker exec "$ids" sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > "$backup/database.dump"
+  test -s "$backup/database.dump"
+  docker exec -i "$ids" pg_restore --list < "$backup/database.dump" > "$backup/database.list"
+  # Stop stores before copying their persistent data. No volumes are removed.
+  stores="$(for service in redis qdrant; do docker ps -q --filter label=com.docker.compose.project=staging --filter "label=com.docker.compose.service=$service"; done)"
+  if [[ -n "$stores" ]]; then docker stop $stores > /dev/null; fi
+  while IFS= read -r volume; do
+    [[ "$volume" = staging_* ]] || { echo 'Foreign staging volume' >&2; exit 1; }
+    # PostgreSQL is backed up logically, not copied live.
+    [[ "$volume" = staging_postgres_data ]] && continue
+    docker run --rm --network none --mount "type=volume,src=$volume,dst=/data,readonly" \
+      --entrypoint tar postgres:16-alpine -C /data -cf - . > "$backup/$volume.tar"
+  done < <(docker volume ls -q --filter label=com.docker.compose.project=staging)
+else
+  if [[ -n "$(docker ps -aq --filter label=com.docker.compose.project=staging)" || -n "$(docker volume ls -q --filter label=com.docker.compose.project=staging)" ]]; then
+    echo 'Staging exists but postgres is not running; inspect the existing stack before retrying.' >&2
+    exit 1
+  fi
+  echo 'First bootstrap: no existing staging containers or volumes' > "$backup/first-bootstrap"
+fi
+# Failure leaves the backup and quiesced staging services for investigation.
+# No automatic restore or production action is attempted.
+tar -xf "$bundle" --no-same-owner
+install -m 600 "$release" .release
+compose=("${compose_env[@]}" docker compose -p staging -f compose.yml -f compose.staging.yml --env-file .env --env-file .release)
+"${compose[@]}" config --format json | python3 scripts/assert_staging.py
+# Application images were loaded over SSH and must never be pulled.
+"${compose[@]}" pull postgres redis qdrant caddy cloudflared
+"${compose[@]}" up -d postgres redis qdrant
+ready=0
+for attempt in $(seq 1 30); do
+  if "${compose[@]}" exec -T postgres sh -c 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"' >/dev/null 2>&1; then ready=1; break; fi
+  sleep 2
+done
+[[ "$ready" = 1 ]]
+"${compose[@]}" run --rm --no-deps api python manage.py migrate --noinput
+"${compose[@]}" run --rm --no-deps api python manage.py sync_platform_settings
+"${compose[@]}" up -d
+ready=0
+for attempt in $(seq 1 30); do
+  if "${compose[@]}" exec -T api python -c 'import urllib.request; r=urllib.request.Request("http://127.0.0.1:8000/health/",headers={"Host":"fsandcube-api.fildah.com","X-Forwarded-Proto":"https"}); urllib.request.urlopen(r,timeout=5).read()' >/dev/null 2>&1; then ready=1; break; fi
+  sleep 2
+done
+[[ "$ready" = 1 ]]
+for service in auth-web care-web fildah-web; do
+  "${compose[@]}" exec -T "$service" wget -qO- http://127.0.0.1/build.txt | grep -Fx "$(sed -n "s/^$(case "$service" in auth-web) echo AUTH;; care-web) echo CARE;; fildah-web) echo FILDAH;; esac)_SHA=//p" .release)" > /dev/null
+done
+for service in index-web business-web; do
+  expected="$(sed -n "s/^$(case "$service" in index-web) echo INDEX;; business-web) echo BUSINESS;; esac)_SHA=//p" .release)"
+  "${compose[@]}" exec -T -e EXPECTED_SHA="$expected" "$service" node -e 'fetch("http://127.0.0.1:3000/build.txt").then(async r=>{if(!r.ok||(await r.text()).trim()!==process.env.EXPECTED_SHA)process.exit(1)}).catch(()=>process.exit(1))'
+done
+"${compose[@]}" exec -T worker celery -A config inspect ping --timeout 10
+"${compose[@]}" exec -T attachment-worker celery -A config inspect ping --timeout 10
+"${compose[@]}" ps --all --format json > "$backup/staging-status.json"
+python3 - "$backup/staging-status.json" <<'PY'
+import json, pathlib, sys
+text = pathlib.Path(sys.argv[1]).read_text()
+rows = json.loads(text) if text.lstrip().startswith('[') else [json.loads(line) for line in text.splitlines() if line]
+required = {'api','worker','attachment-worker','billing-beat','postgres','redis','qdrant','caddy','cloudflared','auth-web','care-web','fildah-web','index-web','business-web'}
+if {r['Service'] for r in rows} != required or any(r['State'] != 'running' or r.get('Health') == 'unhealthy' or any(p.get('PublishedPort') for p in r.get('Publishers') or []) for r in rows):
+    raise SystemExit('Staging services missing, unhealthy, stopped or publishing ports')
+PY
+python3 - <<'PY'
+import pathlib, subprocess
+values = dict(line.split('=', 1) for line in pathlib.Path('.release').read_text().splitlines())
+expected = {'api': 'FILDAH_API', 'worker': 'FILDAH_WORKER', 'attachment-worker': 'FILDAH_WORKER', 'billing-beat': 'FILDAH_WORKER',
+            'auth-web': 'AUTH_WEB', 'care-web': 'CARE_WEB', 'fildah-web': 'FILDAH_WEB', 'index-web': 'INDEX_WEB', 'business-web': 'BUSINESS_WEB'}
+ids = subprocess.check_output(['docker', 'ps', '-q', '--filter', 'label=com.docker.compose.project=staging'], text=True).split()
+rows = subprocess.check_output(['docker', 'inspect', '--format', '{{.Image}} {{index .Config.Labels "com.docker.compose.service"}}', *ids], text=True).splitlines()
+for row in rows:
+    image, service = row.split()
+    if service in expected and image != values[expected[service] + '_IMAGE_ID']:
+        raise SystemExit('Running staging image identity mismatch: ' + service)
+PY
+snapshot_production > "$backup/production.after"
+diff -u "$backup/production.before" "$backup/production.after"
+# No staging image history. Never force removal or prune unrelated images.
+while IFS= read -r image; do
+  docker image rm "$image" >/dev/null 2>&1 || echo 'An old staging image remains in use; retained.' >&2
+done < <(docker image ls -q --filter label=com.fildah.environment=staging --filter dangling=true | sort -u)
+echo "Staging rollout complete; backup: $backup. Seven-host browser/provider checks still required."
