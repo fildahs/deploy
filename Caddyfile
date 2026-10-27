@@ -34,24 +34,30 @@ auth.fildah.com {
 	reverse_proxy auth-web:80
 }
 
-healthscout.fildah.com {
-	encode zstd gzip
-	reverse_proxy healthscout-web:80
-}
-
 rxchat.fildah.com {
-	encode zstd gzip
-	reverse_proxy rxchat-web:80
+    encode zstd gzip
+    reverse_proxy rxchat-web:80 {
+        flush_interval -1
+        header_up X-Real-IP {client_ip}
+        header_up X-Forwarded-Proto {scheme}
+        header_up X-Forwarded-Host {host}
+    }
 }
 
 api.fildah.com {
-	encode zstd gzip
-	reverse_proxy api:8000 {
-		flush_interval -1
-		header_up X-Real-IP {client_ip}
-		header_up X-Forwarded-Proto {scheme}
-		header_up X-Forwarded-Host {host}
-	}
+    encode zstd gzip
+    @active_api path /auth/* /account/* /config/* /health /health/* /home/* /products/* /pages/* /docs/* /blog/* /contact/* /developers/api/*
+    handle @active_api {
+        reverse_proxy api:8000 {
+            flush_interval -1
+            header_up X-Real-IP {client_ip}
+            header_up X-Forwarded-Proto {scheme}
+            header_up X-Forwarded-Host {host}
+        }
+    }
+    handle {
+        respond "Not found" 404
+    }
 }
 
 # Fildah Console: the admin, on its own host. Same API container; Django
