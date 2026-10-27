@@ -1,96 +1,143 @@
+import hashlib
 import io
+import tarfile
 import json
 from pathlib import Path
+import subprocess
+import tempfile
 import unittest
-from unittest.mock import Mock
+from unittest.mock import patch
 
-from scripts.require_release_ci import require_successful_ci
-from scripts.require_staging_ci import manifest, require_jobs, SERVICES
+from scripts import staging_release as release
+from scripts.validate_staging_release import validate
 
 ROOT = Path(__file__).resolve().parents[1]
-SHA = 'a' * 40
 
 
-class StagingReleaseTests(unittest.TestCase):
-    def env(self):
-        return {'GITHUB_EVENT_NAME': 'workflow_dispatch', 'GITHUB_REF': 'refs/heads/staging',
-                'DEPLOY_SHA': SHA, 'CHECKED_OUT_SHA': SHA, **{f'{key}_SHA': SHA for key in SERVICES}}
+class LocalStagingReleaseTests(unittest.TestCase):
+    def test_images_have_staging_destinations_and_distinct_care_package(self):
+        selected = {repo: 'a' * 40 for repo in release.SOURCES}
+        builds = list(release.build_commands(selected, Path('/export')))
+        self.assertEqual(len(builds), 7)
+        for variable, tag, args in builds:
+            self.assertTrue(tag.endswith(':staging-' + 'a' * 40))
+            self.assertIn('--push', args)
+            self.assertIn('linux/amd64', args)
+            self.assertNotIn('CF_ACCESS_CLIENT_SECRET', ' '.join(args))
+        care = next(args for name, _, args in builds if name == 'CARE_WEB_IMAGE')
+        self.assertIn('ghcr.io/fildahs/care-web:staging-' + 'a' * 40, care)
+        self.assertIn('UNDER_CONSTRUCTION=false', care)
+        for value in release.URLS.values():
+            self.assertTrue(value.startswith('https://fsandcube-'))
 
-    def test_manifest_has_only_exact_staging_images(self):
-        release = manifest(self.env())
-        images = [value for name, value in release.items() if name.endswith('_IMAGE')]
-        self.assertEqual(len(images), 7)
-        self.assertTrue(all(value.endswith(':staging-' + SHA) for value in images))
-        self.assertIn('/care-web:', release['CARE_WEB_IMAGE'])
-
-    def test_wrong_ref_event_checkout_and_mutable_inputs_are_refused(self):
-        for key, value in [('GITHUB_EVENT_NAME', 'push'), ('GITHUB_REF', 'refs/heads/main'),
-                           ('CHECKED_OUT_SHA', 'b' * 40), ('DEPLOY_SHA', 'staging'), ('API_SHA', SHA[:7])]:
-            with self.subTest(key=key), self.assertRaises(ValueError):
-                manifest({**self.env(), key: value})
-        for key in SERVICES:
-            with self.subTest(key=key), self.assertRaises(ValueError):
-                manifest({**self.env(), f'{key}_SHA': ''})
-
-    def test_ci_checks_exact_staging_branch_and_never_accepts_main_success(self):
-        def run(branch):
-            return {'id': 1, 'head_sha': SHA, 'head_branch': branch, 'head_repository': {'full_name': 'fildahs/api'},
-                    'event': 'workflow_dispatch', 'status': 'completed', 'conclusion': 'success', 'run_number': 1}
-        for branch in ('main', 'staging'):
-            fetch = Mock(return_value=io.BytesIO(json.dumps({'workflow_runs': [run(branch)]}).encode()))
-            if branch == 'main':
+    def test_gate_receipt_rejects_changed_sources_makefile_urls_or_logs(self):
+        sources = {repo: 'a' * 40 for repo in release.SOURCES}
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            logs = {}
+            for repo in sources:
+                (directory / f'{repo}.log').write_text('passed')
+                logs[repo] = hashlib.sha256(b'passed').hexdigest()
+            data = {'sources': sources, 'makefile_sha256': 'make-hash', 'build_urls': release.URLS, 'logs': logs}
+            receipt = directory / 'gates.json'
+            receipt.write_text(json.dumps(data))
+            with patch.object(release, 'fingerprint', return_value='make-hash'):
+                release.require_receipt(directory, sources)
                 with self.assertRaises(ValueError):
-                    require_successful_ci('fildahs/api', SHA, 'dummy', fetch, branch='staging')
-            else:
-                require_successful_ci('fildahs/api', SHA, 'dummy', fetch, branch='staging')
-            self.assertIn('branch=staging', fetch.call_args.args[0].full_url)
+                    release.require_receipt(directory, {**sources, 'api': 'b' * 40})
+                receipt.write_text(json.dumps({**data, 'build_urls': {}}))
+                with self.assertRaises(ValueError):
+                    release.require_receipt(directory, sources)
+                receipt.write_text(json.dumps(data))
+                (directory / 'api.log').write_text('tampered')
+                with self.assertRaises(ValueError):
+                    release.require_receipt(directory, sources)
+            with patch.object(release, 'fingerprint', return_value='changed'), self.assertRaises(ValueError):
+                release.require_receipt(directory, sources)
 
-    def test_check_success_without_successful_publish_job_is_refused(self):
-        def fetch(jobs):
-            return Mock(return_value=io.BytesIO(json.dumps({'jobs': jobs}).encode()))
-        checks = {'name': 'Backend', 'status': 'completed', 'conclusion': 'success'}
-        publisher = {'name': 'Publish API Image', 'status': 'completed', 'conclusion': 'success'}
-        for jobs in [[checks], [checks, {**publisher, 'conclusion': 'skipped'}],
-                     [checks, {**publisher, 'status': 'in_progress'}]]:
-            with self.subTest(jobs=jobs), self.assertRaises(ValueError):
-                require_jobs('fildahs/api', {'id': 1, 'run_attempt': 2}, 'dummy', fetch(jobs), ('Backend', 'Publish API Image'))
-        request = fetch([checks, publisher])
-        require_jobs('fildahs/api', {'id': 1, 'run_attempt': 2}, 'dummy', request, ('Backend', 'Publish API Image'))
-        self.assertIn('/attempts/2/jobs', request.call_args.args[0].full_url)
+    def test_checkout_selection_refuses_dirty_wrong_branch_and_unpushed_sources(self):
+        for answers in [('main',), ('staging', ' M runtime.py'), ('staging', '', 'a'*40, 'b'*40)]:
+            with self.subTest(answers=answers), patch.object(release, 'run', side_effect=answers), self.assertRaises(ValueError):
+                release.select(Path('/workspace'), require_pushed=True)
 
-    def test_staging_rollout_cannot_bypass_gate_or_operate_on_production(self):
-        workflow = (ROOT / '.github/workflows/deploy-staging.yml').read_text()
-        trigger = workflow.split('on:\n', 1)[1].split('\npermissions:', 1)[0]
-        self.assertIn('  workflow_dispatch:', trigger)
-        self.assertNotIn('  push:', trigger)
-        self.assertNotIn('repository_dispatch:', trigger)
-        self.assertLess(workflow.index('python3 scripts/require_staging_ci.py'), workflow.index('Configure SSH'))
-        for expected in ['environment: staging', 'group: deploy-staging', 'cancel-in-progress: false',
-                         'test "$(pwd -P)" = /srv/fildah/staging',
-                         'docker compose -p staging -f compose.yml -f compose.staging.yml',
-                         'scripts/assert_staging.py', '.release.previous', 'pg_dump', 'migrate --noinput',
-                         'sync_platform_settings', 'docker compose -p deploy ps', 'production-containers.before',
-                         '--exclude=\'.env\'']:
-            self.assertIn(expected, workflow)
-        self.assertNotIn('--delete', workflow)
-        self.assertNotIn('pg_restore', workflow)
+    def test_failed_gate_removes_old_receipt(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            receipt = directory / 'gates.json'
+            receipt.write_text('old success')
+            with patch.object(release, 'select', return_value={}), patch.object(release, 'fingerprint', return_value='hash'), patch.object(release.subprocess, 'run', side_effect=subprocess.CalledProcessError(1, 'test')):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    release.gate(directory)
+            self.assertFalse(receipt.exists())
 
-    def test_source_workflows_keep_staging_manual_and_use_staging_environment(self):
+    def test_staging_ssh_script_refuses_other_directories_before_docker(self):
+        result = subprocess.run(['bash', str(ROOT / 'scripts/rollout-staging'), '/no/bundle', '/no/release'], cwd='/tmp', capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Wrong staging directory', result.stderr)
+
+    def test_source_workflows_publish_only_main_and_old_staging_path_is_cut(self):
+        self.assertFalse((ROOT / '.github/workflows/deploy-staging.yml').exists())
+        self.assertFalse((ROOT / 'scripts/require_staging_ci.py').exists())
         if not (ROOT.parent / 'api/.github/workflows/ci.yml').is_file():
-            self.skipTest('Cross-repo source workflow audit runs in the shared workspace.')
-        for repo in ['api', 'auth-web', 'care-web', 'index-web', 'fildah-web', 'business-web']:
+            self.skipTest('Cross-repo workflow audit requires shared workspace')
+        for repo in release.SOURCES:
             workflow = (ROOT.parent / repo / '.github/workflows/ci.yml').read_text()
             with self.subTest(repo=repo):
-                self.assertIn('publish_images:', workflow)
-                self.assertIn('default: false', workflow)
-                self.assertIn("github.ref == 'refs/heads/staging'", workflow)
-                self.assertIn("&& 'staging' || ''", workflow)
-                self.assertNotIn('pull_request:', workflow)
+                self.assertNotIn("github.ref == 'refs/heads/staging'", workflow)
+                self.assertIn("if: github.ref == 'refs/heads/main'", workflow)
                 self.assertIn('  push:\n    branches:\n      - main', workflow)
-                self.assertTrue('staging-{0}' in workflow or 'staging-${{ github.sha }}' in workflow)
 
-    def test_production_rollout_remains_manual(self):
+    def test_production_rollout_retains_ci_gate(self):
         workflow = (ROOT / '.github/workflows/deploy-production.yml').read_text()
-        trigger = workflow.split('on:\n', 1)[1].split('\npermissions:', 1)[0]
-        self.assertIn('  workflow_dispatch:', trigger)
-        self.assertNotIn('  push:', trigger)
+        self.assertIn('python3 scripts/require_release_ci.py', workflow)
+        self.assertIn('  workflow_dispatch:', workflow)
+        self.assertNotIn('  push:', workflow)
+
+
+class ReleaseValidationTests(unittest.TestCase):
+    def artifact(self, directory, extra=None):
+        bundle, manifest = directory / 'config.tar', directory / 'release'
+        with tarfile.open(bundle, 'w') as archive:
+            for name in ('compose.yml', 'compose.staging.yml', 'Caddyfile.staging', 'scripts/assert_staging.py', 'scripts/rollout-staging', 'scripts/validate_staging_release.py'):
+                member = tarfile.TarInfo(name)
+                member.size = 1
+                archive.addfile(member, io.BytesIO(b'x'))
+            if extra:
+                archive.addfile(extra)
+        data = {key: 'a'*40 for key in release.SHA_KEYS.values()}
+        for variable, (_, package, _) in release.IMAGES.items():
+            data[variable] = f'ghcr.io/fildahs/{package}:staging-' + 'a'*40 + '@sha256:' + 'b'*64
+        data['CONFIG_SHA256'] = hashlib.sha256(bundle.read_bytes()).hexdigest()
+        manifest.write_text(''.join(f'{key}={value}\n' for key, value in data.items()))
+        return bundle, manifest
+
+    def test_accepts_pinned_images_and_matching_config(self):
+        with tempfile.TemporaryDirectory() as temp:
+            validate(*self.artifact(Path(temp)))
+
+    def test_refuses_production_mutable_or_mismatched_images_and_duplicate_fields(self):
+        with tempfile.TemporaryDirectory() as temp:
+            bundle, manifest = self.artifact(Path(temp))
+            valid = manifest.read_text()
+            changes = [valid.replace(':staging-', ':main-', 1), valid.replace('@sha256:'+'b'*64, '', 1), valid.replace('API_SHA='+'a'*40, 'API_SHA='+'c'*40), valid+'API_SHA='+'a'*40+'\n', valid.replace('CONFIG_SHA256=', 'UNKNOWN=')]
+            for content in changes:
+                manifest.write_text(content)
+                with self.subTest(content=content[:20]), self.assertRaises(SystemExit):
+                    validate(bundle, manifest)
+
+    def test_refuses_changed_archive_traversal_and_symlinks(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            bundle, manifest = self.artifact(directory)
+            bundle.write_bytes(bundle.read_bytes()+b'tampered')
+            with self.assertRaises(SystemExit):
+                validate(bundle, manifest)
+            for name in ('../.env', '/srv/fildah/production/.env', '.env'):
+                member = tarfile.TarInfo(name)
+                with self.subTest(name=name), self.assertRaises(SystemExit):
+                    validate(*self.artifact(directory, member))
+            member = tarfile.TarInfo('scripts/link')
+            member.type = tarfile.SYMTYPE
+            member.linkname = '/srv/fildah/production/.env'
+            with self.assertRaises(SystemExit):
+                validate(*self.artifact(directory, member))

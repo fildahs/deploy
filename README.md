@@ -7,10 +7,12 @@ host-managed `.env`. Never commit the real credentials.
 
 ## CI and deployment approval
 
-Staging CI runs only when requested. In the source repository, choose
-**Actions → CI → Run workflow → staging**, or ask the agent to run staging CI.
-Pushes and pull requests do not start staging checks. Pushes/merges to `main`
-automatically run checks only: no release images and no deployment.
+Staging is verified and built locally: from the workspace root use
+`make staging-plan`, `make staging-gate`, then the owner-approved
+`make staging-publish`. Images go to GHCR and rollout is manual over approved
+SSH. Source/deploy CI jobs run only on `main`; staging uses no Actions gate.
+See [the staging runbook](docs/staging.md) for receipts, runtime setup,
+backups, digest-pinned rollout and rollback.
 
 When production deployment is ready and approved:
 

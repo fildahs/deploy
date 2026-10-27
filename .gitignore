@@ -8,3 +8,10 @@ command*.md
 # Python verification artifacts
 __pycache__/
 *.pyc
+
+# Runtime-only staging state (never committed or archived for image builds)
+staging/
+.release*
+staging.release
+.rollout.lock
+.candidate-*/

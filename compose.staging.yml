@@ -44,6 +44,8 @@ services:
     networks: !override [default]
     environment:
       <<: *staging-environment
+      GUNICORN_WORKERS: "1"
+      GUNICORN_THREADS: "4"
   worker:
     mem_limit: ${WORKER_MEMORY_LIMIT:-256m}
     cpus: ${WORKER_CPU_LIMIT:-0.25}
