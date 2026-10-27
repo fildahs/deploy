@@ -24,7 +24,11 @@ skips source/deploy jobs; staging pushes never run CI.
    through the workspace Makefile, Django checks and migration drift check;
    frontend lint/types/tests/builds, Care/Index contracts and budgets; and
    the Docker-backed deploy suite. Django creates a fresh test database and
-   replays migrations without `--keepdb`. Frontend builds use explicit staging
+   replays migrations without `--keepdb`. A process-local wrapper gives the
+   broad suite cheap fixture password hashes, followed by Google/account/mobile/
+   registration tests with normal hashers. It requires local PostgreSQL on
+   127.0.0.1:5433 and uses separate fresh release/auth test databases; runtime
+   application settings remain unchanged. Frontend builds use explicit staging
    URLs, including Index canonicals and Auth product returns. Tests use mocks
    for provider calls. Do not replace this with SQLite or live provider tests.
 4. Successful checks write logs and `gates.json` under

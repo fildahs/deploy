@@ -68,7 +68,12 @@ def fingerprint(root=ROOT):
 
 def commands(repo):
     if repo == 'api':
-        return [['make', 'check'], ['make', 'makemigrations', 'MIGRATE_ARGS=--check --dry-run'], ['make', 'test']]
+        python = str(ROOT / 'api/venv/bin/python')
+        wrapper = str(ROOT / 'deploy/scripts/staging_api_test.py')
+        return [['make', 'check'], ['make', 'makemigrations', 'MIGRATE_ARGS=--check --dry-run'],
+                ['make', 'test', f'PYTHON={python} {wrapper}'],
+                ['make', 'test', f'PYTHON={python} {wrapper} --normal-hasher',
+                 'TESTS=apps.identity.tests.test_google_security apps.identity.tests.test_accounts apps.identity.tests.test_mobile_auth apps.identity.tests.test_registration_flow']]
     if repo == 'deploy':
         return [['python3', '-m', 'unittest', 'discover', '-s', 'tests', '-v']]
     result = [['npm', 'run', 'lint']]
