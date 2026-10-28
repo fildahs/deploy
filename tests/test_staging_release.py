@@ -108,6 +108,12 @@ class LocalStagingReleaseTests(unittest.TestCase):
         self.assertIn('  workflow_dispatch:', workflow)
         self.assertNotIn('  push:', workflow)
 
+    def test_production_rollout_targets_canonical_paths(self):
+        workflow = (ROOT / '.github/workflows/deploy-production.yml').read_text()
+        self.assertIn('/srv/fildah/production', workflow)
+        self.assertIn('/srv/fildah/backups/production', workflow)
+        self.assertNotIn('/srv/fildah/deploy', workflow)
+
 
 class ReleaseValidationTests(unittest.TestCase):
     def artifact(self, directory, extra=None):

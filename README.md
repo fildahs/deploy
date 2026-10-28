@@ -55,4 +55,5 @@ GitHub require the workflow to exist on the repository's default branch.
 ## Isolated staging
 
 [Staging runbook](docs/staging.md): bootstrap, manual exact-SHA release,
-rollback, separately approved database restore, and production folder-move requirements before rollout.
+rollback and separately approved database restore. See [VPS runtime layout](docs/vps-layout.md)
+for the live production/staging folders and the standalone RxChat ingress boundary.

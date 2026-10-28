@@ -115,4 +115,5 @@ AI routing and Paystack test mode using staging data only.
 
 There is no automated image rollback. Database/volume restoration is a separate
 destructive owner-approved operation requiring verified backups and image/schema
-compatibility. Production folder moves, detach and purges remain separate tasks.
+compatibility. The live production layout and product boundary are documented in
+[vps-layout.md](vps-layout.md). Production and staging remain separate projects.
