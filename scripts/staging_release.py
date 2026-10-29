@@ -34,7 +34,7 @@ URLS = {name: f'https://fsandcube-{host}.fildah.com' for name, host in {
 BUILD_ARGS = {
     'auth-web': ('VITE_API_BASE_URL', 'VITE_ACCOUNT_BASE_URL', 'VITE_CARE_URL', 'VITE_BUSINESS_URL', 'VITE_INDEX_URL'),
     'care-web': ('VITE_API_BASE_URL', 'VITE_AUTH_BASE_URL', 'VITE_ACCOUNT_BASE_URL', 'VITE_MARKETING_BASE_URL'),
-    'business-web': ('VITE_API_BASE_URL', 'VITE_AUTH_BASE_URL'),
+    'business-web': ('VITE_API_BASE_URL', 'VITE_AUTH_BASE_URL', 'VITE_BUSINESS_URL', 'VITE_CARE_URL', 'VITE_MARKETING_BASE_URL'),
     'index-web': ('VITE_API_BASE_URL', 'VITE_AUTH_BASE_URL', 'VITE_BUSINESS_URL', 'VITE_MARKETING_BASE_URL', 'VITE_SITE_URL'),
     'fildah-web': ('VITE_API_BASE_URL', 'VITE_AUTH_BASE_URL', 'VITE_CARE_URL'),
 }
@@ -79,7 +79,7 @@ def commands(repo):
     if repo != 'fildah-web':
         result.append(['npm', 'run', 'typecheck'])
     result.extend([['npm', 'test'], ['npm', 'run', 'build']])
-    if repo in ('care-web', 'index-web'):
+    if repo in ('care-web', 'index-web', 'business-web'):
         result.extend([['npm', 'run', 'api:check'], ['npm', 'run', 'budget']])
     return result
 
@@ -89,8 +89,9 @@ def gate_inputs(repo, sources):
     if repo == 'api':
         result['makefile_sha256'] = fingerprint()
         result['runner_sha256'] = hashlib.sha256((ROOT / 'deploy/scripts/staging_api_test.py').read_bytes()).hexdigest()
-    if repo in ('care-web', 'index-web'):
-        contract = 'openapi-care.yaml' if repo == 'care-web' else 'openapi-index.yaml'
+    if repo in ('care-web', 'index-web', 'business-web'):
+        contract = {'care-web': 'openapi-care.yaml', 'index-web': 'openapi-index.yaml',
+                    'business-web': 'openapi-merchant.yaml'}[repo]
         result['contract_sha256'] = hashlib.sha256((ROOT / 'api/docs' / contract).read_bytes()).hexdigest()
     if repo == 'deploy':
         # Deployment tests audit source workflows across the workspace.

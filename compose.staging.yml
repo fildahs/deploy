@@ -117,6 +117,9 @@ services:
     mem_limit: ${BUSINESS_WEB_MEMORY_LIMIT:-256m}
     cpus: ${BUSINESS_WEB_CPU_LIMIT:-0.25}
     networks: !override [default]
+    environment:
+      CF_ACCESS_CLIENT_ID: ${CF_ACCESS_CLIENT_ID:-}
+      CF_ACCESS_CLIENT_SECRET: ${CF_ACCESS_CLIENT_SECRET:-}
   redis:
     mem_limit: ${REDIS_MEMORY_LIMIT:-256m}
     cpus: ${REDIS_CPU_LIMIT:-0.25}

@@ -31,6 +31,20 @@ class LocalStagingReleaseTests(unittest.TestCase):
         for value in release.URLS.values():
             self.assertTrue(value.startswith('https://fsandcube-'))
 
+    def test_business_gate_checks_and_fingerprints_the_merchant_contract(self):
+        commands = release.commands('business-web')
+        self.assertIn(['npm', 'run', 'api:check'], commands)
+        self.assertIn(['npm', 'run', 'budget'], commands)
+        sources = {'business-web': 'a' * 40}
+        with tempfile.TemporaryDirectory() as temp, patch.object(release, 'ROOT', Path(temp)):
+            contract = Path(temp) / 'api/docs/openapi-merchant.yaml'
+            contract.parent.mkdir(parents=True)
+            contract.write_bytes(b'merchant contract')
+            inputs = release.gate_inputs('business-web', sources)
+            self.assertEqual(inputs['contract_sha256'], hashlib.sha256(b'merchant contract').hexdigest())
+            contract.write_bytes(b'changed contract')
+            self.assertNotEqual(inputs, release.gate_inputs('business-web', sources))
+
     def test_gate_receipt_rejects_changed_sources_makefile_urls_or_logs(self):
         sources = {repo: 'a' * 40 for repo in release.SOURCES}
         with tempfile.TemporaryDirectory() as temp:
