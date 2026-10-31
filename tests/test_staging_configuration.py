@@ -72,13 +72,29 @@ class ComposeCompatibilityTests(unittest.TestCase):
             with self.subTest(collection=collection), self.assertRaises(AssertionError):
                 assert_staging(bad)
 
-    def test_caddy_production_adapts_to_identical_json(self):
+    def test_caddy_production_changes_only_the_bare_domain_redirect(self):
         def adapt(file):
             return json.loads(run('docker', 'run', '--rm', '--network', 'none',
                                   '-e', 'CADDY_ACME_EMAIL=placeholder@example.invalid',
                                   '-v', f'{file}:/etc/caddy/Caddyfile:ro', 'caddy:2.8-alpine',
                                   'caddy', 'adapt', '--config', '/etc/caddy/Caddyfile'))
-        digest = hashlib.sha256(json.dumps(adapt(ROOT / 'Caddyfile'), sort_keys=True).encode()).hexdigest()
+        actual = adapt(ROOT / 'Caddyfile')
+        routes = [route for server in actual['apps']['http']['servers'].values()
+                  for route in server.get('routes', [])]
+        bare = next(route for route in routes if route.get('match') == [{'host': ['fildah.com']}])
+        handler = bare['handle'][0]['routes'][0]['handle'][0]
+        self.assertEqual(handler, {'handler': 'static_response', 'status_code': 301,
+                                  'headers': {'Location': ['https://www.fildah.com{http.request.uri}']}})
+        www = next(route for route in routes if route.get('match') == [{'host': ['www.fildah.com']}])
+        self.assertEqual(www['handle'][0]['routes'][0]['handle'][-1]['upstreams'], [{'dial': 'fildah-web:80'}])
+        # Reverse only the intended redirect before comparing the frozen baseline.
+        text = (ROOT / 'Caddyfile').read_text()
+        text = text.replace('fildah.com {\n\tredir https://www.fildah.com{uri} permanent\n}\n', '')
+        text = text.replace('{$FILDAH_HOSTS:www.fildah.com}', '{$FILDAH_HOSTS:fildah.com, www.fildah.com}')
+        with tempfile.TemporaryDirectory() as directory:
+            original = Path(directory) / 'Caddyfile'
+            original.write_text(text)
+            digest = hashlib.sha256(json.dumps(adapt(original), sort_keys=True).encode()).hexdigest()
         self.assertEqual(digest, (BASELINE / 'Caddyfile.sha256').read_text().strip())
 
     def test_staging_proxy_has_exactly_seven_hosts(self):
