@@ -18,7 +18,7 @@ class LocalStagingReleaseTests(unittest.TestCase):
     def test_images_have_staging_destinations_and_distinct_care_package(self):
         selected = {repo: 'a' * 40 for repo in release.SOURCES}
         builds = list(release.build_commands(selected, Path('/export')))
-        self.assertEqual(len(builds), 7)
+        self.assertEqual(len(builds), 8)
         for variable, tag, args in builds:
             self.assertTrue(tag.startswith('fildah-staging/') and tag.endswith(':current'))
             self.assertIn('--load', args)
@@ -28,6 +28,8 @@ class LocalStagingReleaseTests(unittest.TestCase):
         care = next(args for name, _, args in builds if name == 'CARE_WEB_IMAGE')
         self.assertIn('fildah-staging/care-web:current', care)
         self.assertIn('UNDER_CONSTRUCTION=false', care)
+        embeddings = next(args for name, _, args in builds if name == 'EMBEDDINGS_IMAGE')
+        self.assertEqual(embeddings[-1], '/export/api/embeddings')
         for value in release.URLS.values():
             self.assertTrue(value.startswith('https://fsandcube-'))
 
@@ -133,7 +135,7 @@ class ReleaseValidationTests(unittest.TestCase):
     def artifact(self, directory, extra=None):
         bundle, manifest = directory / 'config.tar', directory / 'release'
         with tarfile.open(bundle, 'w') as archive:
-            for name in ('compose.yml', 'compose.staging.yml', 'Caddyfile.staging', 'scripts/assert_staging.py', 'scripts/rollout-staging', 'scripts/validate_staging_release.py'):
+            for name in ('compose.yml', 'compose.staging.yml', 'Caddyfile.staging', 'scripts/assert_staging.py', 'scripts/rollout-staging', 'scripts/validate_staging_release.py', 'scripts/refresh-collation'):
                 member = tarfile.TarInfo(name)
                 member.size = 1
                 archive.addfile(member, io.BytesIO(b'x'))

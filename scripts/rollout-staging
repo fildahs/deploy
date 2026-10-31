@@ -44,7 +44,7 @@ if [[ -n "$ids" ]]; then
   test -s "$backup/database.dump"
   docker exec -i "$ids" pg_restore --list < "$backup/database.dump" > "$backup/database.list"
   # Stop stores before copying their persistent data. No volumes are removed.
-  stores="$(for service in redis qdrant; do docker ps -q --filter label=com.docker.compose.project=staging --filter "label=com.docker.compose.service=$service"; done)"
+  stores="$(for service in redis; do docker ps -q --filter label=com.docker.compose.project=staging --filter "label=com.docker.compose.service=$service"; done)"
   if [[ -n "$stores" ]]; then docker stop $stores > /dev/null; fi
   while IFS= read -r volume; do
     [[ "$volume" = staging_* ]] || { echo 'Foreign staging volume' >&2; exit 1; }
@@ -67,17 +67,24 @@ install -m 600 "$release" .release
 compose=("${compose_env[@]}" docker compose -p staging -f compose.yml -f compose.staging.yml --env-file .env --env-file .release)
 "${compose[@]}" config --format json | python3 scripts/assert_staging.py
 # Application images were loaded over SSH and must never be pulled.
-"${compose[@]}" pull postgres redis qdrant caddy cloudflared
-"${compose[@]}" up -d postgres redis qdrant
+"${compose[@]}" pull postgres redis caddy cloudflared
+"${compose[@]}" up -d postgres redis
 ready=0
 for attempt in $(seq 1 30); do
   if "${compose[@]}" exec -T postgres sh -c 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"' >/dev/null 2>&1; then ready=1; break; fi
   sleep 2
 done
 [[ "$ready" = 1 ]]
+"${compose[@]}" exec -T postgres sh -s < scripts/refresh-collation
 "${compose[@]}" run --rm --no-deps api python manage.py migrate --noinput
 "${compose[@]}" run --rm --no-deps api python manage.py sync_platform_settings
 "${compose[@]}" up -d
+ready=0
+for attempt in $(seq 1 30); do
+  if "${compose[@]}" exec -T embeddings python -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8080/health",timeout=5).read()' >/dev/null 2>&1; then ready=1; break; fi
+  sleep 2
+done
+[[ "$ready" = 1 ]]
 ready=0
 for attempt in $(seq 1 30); do
   if "${compose[@]}" exec -T api python -c 'import urllib.request; r=urllib.request.Request("http://127.0.0.1:8000/health/",headers={"Host":"fsandcube-api.fildah.com","X-Forwarded-Proto":"https"}); urllib.request.urlopen(r,timeout=5).read()' >/dev/null 2>&1; then ready=1; break; fi
@@ -98,7 +105,7 @@ python3 - "$backup/staging-status.json" <<'PY'
 import json, pathlib, sys
 text = pathlib.Path(sys.argv[1]).read_text()
 rows = json.loads(text) if text.lstrip().startswith('[') else [json.loads(line) for line in text.splitlines() if line]
-required = {'api','worker','attachment-worker','billing-beat','postgres','redis','qdrant','caddy','cloudflared','auth-web','care-web','fildah-web','index-web','business-web'}
+required = {'api','worker','attachment-worker','billing-beat','embeddings','postgres','redis','caddy','cloudflared','auth-web','care-web','fildah-web','index-web','business-web'}
 if {r['Service'] for r in rows} != required or any(r['State'] != 'running' or r.get('Health') == 'unhealthy' or any(p.get('PublishedPort') for p in r.get('Publishers') or []) for r in rows):
     raise SystemExit('Staging services missing, unhealthy, stopped or publishing ports')
 PY
@@ -106,6 +113,7 @@ python3 - <<'PY'
 import pathlib, subprocess
 values = dict(line.split('=', 1) for line in pathlib.Path('.release').read_text().splitlines())
 expected = {'api': 'FILDAH_API', 'worker': 'FILDAH_WORKER', 'attachment-worker': 'FILDAH_WORKER', 'billing-beat': 'FILDAH_WORKER',
+            'embeddings': 'EMBEDDINGS',
             'auth-web': 'AUTH_WEB', 'care-web': 'CARE_WEB', 'fildah-web': 'FILDAH_WEB', 'index-web': 'INDEX_WEB', 'business-web': 'BUSINESS_WEB'}
 ids = subprocess.check_output(['docker', 'ps', '-q', '--filter', 'label=com.docker.compose.project=staging'], text=True).split()
 rows = subprocess.check_output(['docker', 'inspect', '--format', '{{.Image}} {{index .Config.Labels "com.docker.compose.service"}}', *ids], text=True).splitlines()

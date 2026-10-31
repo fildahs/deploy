@@ -18,6 +18,7 @@ def validate(bundle, release, check_images=False):
         values[key] = value
     sources = {'API', 'AUTH', 'CARE', 'BUSINESS', 'INDEX', 'FILDAH', 'DEPLOY'}
     images = {'FILDAH_API_IMAGE': ('fildah-api', 'API'), 'FILDAH_WORKER_IMAGE': ('fildah-api-worker', 'API'),
+              'EMBEDDINGS_IMAGE': ('fildah-embeddings', 'API'),
               'AUTH_WEB_IMAGE': ('auth-web', 'AUTH'), 'CARE_WEB_IMAGE': ('care-web', 'CARE'),
               'BUSINESS_WEB_IMAGE': ('business-web', 'BUSINESS'), 'INDEX_WEB_IMAGE': ('index-web', 'INDEX'),
               'FILDAH_WEB_IMAGE': ('fildah-web', 'FILDAH')}
@@ -40,7 +41,7 @@ def validate(bundle, release, check_images=False):
         raise SystemExit('Config bundle hash mismatch')
     with tarfile.open(bundle) as archive:
         names = archive.getnames()
-        if len(names) != len(set(names)) or not {"compose.yml", "compose.staging.yml", "Caddyfile.staging", "scripts/assert_staging.py", "scripts/rollout-staging", "scripts/validate_staging_release.py"} <= set(names):
+        if len(names) != len(set(names)) or not {"compose.yml", "compose.staging.yml", "Caddyfile.staging", "scripts/assert_staging.py", "scripts/rollout-staging", "scripts/validate_staging_release.py", "scripts/refresh-collation"} <= set(names):
             raise SystemExit("Missing or duplicate config entries")
         for item in archive:
             name = pathlib.PurePosixPath(item.name)

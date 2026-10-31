@@ -18,12 +18,15 @@ SOURCES = ('api', 'auth-web', 'care-web', 'business-web', 'index-web', 'fildah-w
 IMAGES = {
     'FILDAH_API_IMAGE': ('api', 'fildah-api', 'app'),
     'FILDAH_WORKER_IMAGE': ('api', 'fildah-api-worker', 'worker'),
+    'EMBEDDINGS_IMAGE': ('api', 'fildah-embeddings', None),
     'AUTH_WEB_IMAGE': ('auth-web', 'auth-web', None),
     'CARE_WEB_IMAGE': ('care-web', 'care-web', None),
     'BUSINESS_WEB_IMAGE': ('business-web', 'business-web', None),
     'INDEX_WEB_IMAGE': ('index-web', 'index-web', None),
     'FILDAH_WEB_IMAGE': ('fildah-web', 'fildah-web', None),
 }
+# Images built from a folder inside their source repository.
+CONTEXTS = {'EMBEDDINGS_IMAGE': 'api/embeddings'}
 SHA_KEYS = dict(zip(SOURCES, ('API_SHA', 'AUTH_SHA', 'CARE_SHA', 'BUSINESS_SHA', 'INDEX_SHA', 'FILDAH_SHA', 'DEPLOY_SHA')))
 URLS = {name: f'https://fsandcube-{host}.fildah.com' for name, host in {
     'VITE_API_BASE_URL': 'api', 'VITE_AUTH_BASE_URL': 'auth',
@@ -171,7 +174,7 @@ def build_commands(sources, context):
         if repo in ('auth-web', 'index-web'):
             # BuildKit passes the value directly; never print it or use ARG.
             args.extend(['--secret', 'id=ui_token,env=UI_BUILD_TOKEN'])
-        args.append(str(context / repo))
+        args.append(str(context / CONTEXTS.get(variable, repo)))
         yield variable, tag, args
 
 

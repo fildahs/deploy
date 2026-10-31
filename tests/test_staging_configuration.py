@@ -31,12 +31,34 @@ def config(*files, staging=False):
 
 
 class ComposeCompatibilityTests(unittest.TestCase):
-    def test_production_is_identical_to_committed_pre_task_config(self):
-        self.assertEqual(config(BASELINE / 'compose.yml'), config(ROOT / 'compose.yml'))
+    def test_production_keeps_baseline_except_the_memory_cutover(self):
+        expected = config(BASELINE / 'compose.yml')
+        actual = config(ROOT / 'compose.yml')
+        self.assertEqual(actual['services']['embeddings']['environment']['EMBEDDINGS_BATCH_SIZE'], '16')
+        expected['services']['embeddings'] = actual['services']['embeddings']
+        del expected['services']['qdrant']
+        del expected['volumes']['qdrant_data']
+        expected['services']['postgres']['image'] = 'pgvector/pgvector:0.8.1-pg16'
+        for service in ('api', 'worker', 'attachment-worker', 'billing-beat'):
+            definition = expected['services'][service]
+            definition.get('depends_on', {}).pop('qdrant', None)
+            definition['environment'] = {
+                key: value for key, value in definition['environment'].items()
+                if not key.startswith('QDRANT_')
+            }
+            definition['environment']['EMBEDDINGS_URL'] = 'http://embeddings:8080'
+            definition['depends_on']['embeddings'] = actual['services'][service]['depends_on']['embeddings']
+        expected['x-api-secrets'].pop('QDRANT_API_KEY', None)
+        self.assertEqual(expected, actual)
 
     def test_staging_is_isolated_and_every_service_is_limited(self):
         data = config(ROOT / 'compose.yml', ROOT / 'compose.staging.yml', staging=True)
         assert_staging(data)
+        api_limit = int(data['services']['api']['mem_limit'])
+        worker_limit = int(data['services']['worker']['mem_limit'])
+        self.assertEqual(api_limit, 1024 ** 3)
+        self.assertEqual(worker_limit, 1024 ** 3)
+        self.assertEqual(data['services']['embeddings']['environment']['EMBEDDINGS_BATCH_SIZE'], '4')
         self.assertTrue(any(mount['source'].endswith('/Caddyfile.staging') for mount in data['services']['caddy']['volumes']))
         for key, changed in [('ports', ['80:80']), ('networks', {'foreign-network': None}), ('mem_limit', 0),
                              ('pull_policy', 'always'), ('image', 'ghcr.io/fildahs/fildah-api:main')]:

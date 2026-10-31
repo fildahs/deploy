@@ -1,0 +1,36 @@
+#!/bin/sh
+# Run inside the postgres container: `exec -T postgres sh -s < scripts/refresh-collation`.
+# Moving from postgres:16-alpine (musl) to the pgvector image (glibc) changes text
+# sort order, so text indexes are rebuilt once. Later runs find nothing to do.
+set -eu
+query() {
+  psql -X -U "${POSTGRES_USER:-fildah}" -d "${POSTGRES_DB:-fildah}" -At -v ON_ERROR_STOP=1 "$@"
+}
+stale="$(query -c "SELECT datcollversion IS DISTINCT FROM pg_database_collation_actual_version(oid) FROM pg_database WHERE datname = current_database()")"
+if [ "$stale" = t ]; then
+  unversioned="$(query -c "SELECT datcollversion IS NULL FROM pg_database WHERE datname = current_database()")"
+  if [ "$unversioned" = t ]; then
+    # musl records NULL; PostgreSQL refuses REFRESH from NULL to a version.
+    # Track this database's successful reindex without changing system catalogs.
+    actual="$(query -c "SELECT pg_database_collation_actual_version(oid) FROM pg_database WHERE datname = current_database()")"
+    oid="$(query -c "SELECT oid FROM pg_database WHERE datname = current_database()")"
+    stamp="${PGDATA:-/var/lib/postgresql/data}/.fildah-collation-${oid}"
+    if [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$actual" ]; then
+      exit 0
+    fi
+  fi
+  query <<'SQL'
+SELECT current_database() AS db \gset
+REINDEX DATABASE :"db";
+SQL
+  if [ "$unversioned" = t ]; then
+    printf '%s\n' "$actual" > "$stamp.tmp"
+    mv "$stamp.tmp" "$stamp"
+  else
+    query <<'SQL'
+SELECT current_database() AS db \gset
+ALTER DATABASE :"db" REFRESH COLLATION VERSION;
+SQL
+  fi
+  echo 'Collation changed: indexes rebuilt.'
+fi

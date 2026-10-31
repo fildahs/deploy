@@ -75,16 +75,23 @@ no environment file enters an image or the config archive.
    service changes, validates archive paths/hash, takes a lock and checks the
    candidate Compose in a clean process environment without displaying secrets.
 4. Existing staging writers stop before a validated logical Postgres dump.
-   Redis/Qdrant stop before non-Postgres volume copies. Only staging volumes
+   Redis stops before non-Postgres volume copies. Only staging volumes
    are backed up; no volumes are deleted. A stopped prior Postgres or orphan
    staging volumes abort bootstrap with a diagnostic. First bootstrap requires
    no existing staging containers/volumes.
 5. Install current config/release, pull only public infrastructure images,
-   start stores, migrate and sync settings, then start all services. Every
-   application service has `pull_policy: never`. Verify API health, frontend
+   start stores, rebuild indexes once if the Postgres collation changed, migrate
+   and sync settings, then start all services. Every
+   application service has `pull_policy: never`. Verify API and embedding-service health, frontend
    build SHAs, exact running image IDs, worker pings, all 14 services, no host
    ports and unchanged non-staging IDs/states/start times. Failure leaves
    staging backups for investigation; production is never restored or modified.
+
+   Alpine databases have no recorded libc version. PostgreSQL refuses to
+   refresh that NULL version to Debian's version, so `refresh-collation`
+   records a successful reindex in a per-database `.fildah-collation-<oid>`
+   marker in `PGDATA`. It reindexes again if the actual library version changes.
+   Already versioned databases use PostgreSQL's normal refresh command.
 6. After success, discard the upload artifacts. The current `.release` and
    installed config describe the running deployment; no previous image/config
    release pair is retained. Only untagged images carrying the explicit staging

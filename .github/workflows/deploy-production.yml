@@ -194,13 +194,10 @@ jobs:
           printf 'Weekly customer rows: subscriptions=%s pending_payments=%s live_provider_subscriptions=%s\n' \
             "$weekly_subs" "$weekly_payments" "$weekly_provider_subs"
           ./scripts/compose-production exec -T api python - <<'PY'
-          import json
           import os
-          import urllib.parse
-          import urllib.request
 
           required = (
-              "SECRET_KEY", "QDRANT_API_KEY",
+              "SECRET_KEY",
               "PAYSTACK_SECRET_KEY", "PAYSTACK_PUBLIC_KEY", "BREVO_API_KEY",
           )
           optional = ("OPENROUTER_API_KEY", "DEEPSEEK_API_KEY", "OPENAI_API_KEY")
@@ -212,15 +209,6 @@ jobs:
                   missing.append(name)
           if missing:
               raise SystemExit("Required credential presence check failed.")
-
-          collection = urllib.parse.quote(os.environ.get("QDRANT_COLLECTION", "RxChat"), safe="")
-          request = urllib.request.Request(
-              os.environ["QDRANT_URL"].rstrip("/") + "/collections/" + collection,
-              headers={"api-key": os.environ["QDRANT_API_KEY"]},
-          )
-          with urllib.request.urlopen(request, timeout=10) as response:
-              result = json.load(response)["result"]
-          print(f"Qdrant collection: status={result.get('status')} points={result.get('points_count')}")
           PY
           if [ "$weekly_subs" -ne 0 ] || [ "$weekly_payments" -ne 0 ] || [ "$weekly_provider_subs" -ne 0 ]; then
             echo "Weekly customer rows require reconciliation before cutover." >&2
@@ -327,10 +315,12 @@ jobs:
           }
 
           worker_image=""
+          embeddings_image=""
           case "$SERVICE" in
             api)
               worker_image="${IMAGE/fildah-api:/fildah-api-worker:}"
-              targets="api worker attachment-worker billing-beat"
+              embeddings_image="${IMAGE/fildah-api:/fildah-embeddings:}"
+              targets="api worker attachment-worker billing-beat embeddings"
               ;;
             caddy)
               targets="caddy"
@@ -359,6 +349,7 @@ jobs:
             docker pull "$IMAGE" </dev/null
             if [ -n "$worker_image" ]; then
               docker pull "$worker_image" </dev/null
+              docker pull "$embeddings_image" </dev/null
             fi
           fi
 
@@ -418,6 +409,10 @@ jobs:
             }
             preserve_running_image api fildah-api
             preserve_running_image worker fildah-api-worker
+            # Absent on the first switch; later releases retain its exact image.
+            if [ -n "$(./scripts/compose-production ps -q embeddings)" ]; then
+              preserve_running_image embeddings fildah-embeddings
+            fi
             worker_container_id="$(./scripts/compose-production ps -q worker)"
             worker_image_id="$(docker inspect --format '{{.Image}}' "$worker_container_id")"
             for service_name in attachment-worker billing-beat; do
@@ -545,6 +540,7 @@ jobs:
             api)
               set_image_var FILDAH_API_IMAGE "$IMAGE"
               set_image_var FILDAH_WORKER_IMAGE "$worker_image"
+              set_image_var EMBEDDINGS_IMAGE "$embeddings_image"
               ;;
             auth-web)
               set_image_var AUTH_WEB_IMAGE "$IMAGE"
@@ -558,6 +554,15 @@ jobs:
           esac
 
           if [ "$SERVICE" = "api" ] || [ "$SERVICE" = "all" ]; then
+            # Memory needs pgvector: move to the pgvector image before migrating.
+            ./scripts/compose-production pull postgres </dev/null
+            ./scripts/compose-production up -d postgres </dev/null
+            for attempt in $(seq 1 30); do
+              ./scripts/compose-production exec -T postgres sh -c \
+                'pg_isready -U "${POSTGRES_USER:-fildah}" -d "${POSTGRES_DB:-fildah}"' </dev/null >/dev/null 2>&1 && break
+              sleep 2
+            done
+            ./scripts/compose-production exec -T postgres sh -s < scripts/refresh-collation
             ./scripts/compose-production run --rm --no-deps api \
               python manage.py migrate --noinput </dev/null
           fi
@@ -597,6 +602,7 @@ jobs:
               verify_running_image worker "$worker_image"
               verify_running_image attachment-worker "$worker_image"
               verify_running_image billing-beat "$worker_image"
+              verify_running_image embeddings "$embeddings_image"
               ;;
             all)
               for service_name in api worker attachment-worker billing-beat auth-web fildah-web index-web; do
@@ -609,8 +615,17 @@ jobs:
           esac
 
           if [ "$SERVICE" = "api" ] || [ "$SERVICE" = "all" ]; then
+            embeddings_ready=0
+            for attempt in $(seq 1 30); do
+              if ./scripts/compose-production exec -T embeddings python -c \
+                'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8080/health",timeout=5).read()' </dev/null >/dev/null 2>&1; then
+                embeddings_ready=1
+                break
+              fi
+              sleep 2
+            done
+            [ "$embeddings_ready" = 1 ]
             ./scripts/compose-production exec -T api python manage.py migrate --check </dev/null
-            ./scripts/compose-production exec -T api python manage.py setup_qdrant </dev/null
             ./scripts/compose-production exec -T api python - <<'PY'
           import urllib.request
 

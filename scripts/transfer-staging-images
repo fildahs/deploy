@@ -8,6 +8,6 @@ bundle="$(realpath "$2")"
 release="$(realpath "$3")"
 python3 "$(dirname "${BASH_SOURCE[0]}")/validate_staging_release.py" "$bundle" "$release" --check-images
 mapfile -t images < <(sed -n '/^[A-Z_]*_IMAGE=/s/^[^=]*=//p' "$release")
-[[ ${#images[@]} = 7 ]]
+[[ ${#images[@]} = 8 ]]
 docker save "${images[@]}" | gzip -1 | ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$target" \
   'flock -n /srv/fildah/staging/.rollout.lock docker load'

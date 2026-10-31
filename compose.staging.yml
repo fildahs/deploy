@@ -14,8 +14,6 @@ x-staging-environment: &staging-environment
   OPAY_SECRET_KEY: ""
   OPAY_PUBLIC_KEY: ""
   OPAY_MERCHANT_ID: ""
-  QDRANT_COLLECTION: "${QDRANT_COLLECTION:-Staging}"
-  QDRANT_MEMORY_COLLECTION: "${QDRANT_MEMORY_COLLECTION:-StagingMemory}"
   MEDIA_STORAGE_BACKEND: "filesystem"
 
 services:
@@ -40,7 +38,7 @@ services:
         header_up X-Forwarded-Proto {http.request.header.X-Forwarded-Proto}
   api:
     pull_policy: never
-    mem_limit: ${API_MEMORY_LIMIT:-256m}
+    mem_limit: ${API_MEMORY_LIMIT:-1024m}
     cpus: ${API_CPU_LIMIT:-0.25}
     networks: !override [default]
     environment:
@@ -49,7 +47,7 @@ services:
       GUNICORN_THREADS: "4"
   worker:
     pull_policy: never
-    mem_limit: ${WORKER_MEMORY_LIMIT:-256m}
+    mem_limit: ${WORKER_MEMORY_LIMIT:-1024m}
     cpus: ${WORKER_CPU_LIMIT:-0.25}
     networks: !override [default]
     environment:
@@ -61,6 +59,13 @@ services:
     networks: !override [default]
     environment:
       <<: *staging-environment
+  embeddings:
+    pull_policy: never
+    mem_limit: ${EMBEDDINGS_MEMORY_LIMIT:-1024m}
+    cpus: ${EMBEDDINGS_CPU_LIMIT:-0.25}
+    networks: !override [default]
+    environment:
+      EMBEDDINGS_BATCH_SIZE: ${EMBEDDINGS_BATCH_SIZE:-4}
   billing-beat:
     pull_policy: never
     mem_limit: ${BILLING_BEAT_MEMORY_LIMIT:-256m}
@@ -80,11 +85,6 @@ services:
   postgres:
     mem_limit: ${POSTGRES_MEMORY_LIMIT:-256m}
     cpus: ${POSTGRES_CPU_LIMIT:-0.25}
-    networks: !override [default]
-    ports: !reset []
-  qdrant:
-    mem_limit: ${QDRANT_MEMORY_LIMIT:-256m}
-    cpus: ${QDRANT_CPU_LIMIT:-0.25}
     networks: !override [default]
     ports: !reset []
   cloudflared:
