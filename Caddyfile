@@ -24,7 +24,12 @@
 	# are compatible with Cloudflare's Full (strict) SSL/TLS mode.
 }
 
-fildah.com, www.fildah.com {
+# The API trusts only the www origin, so a sign-in started on the bare domain is rejected.
+fildah.com {
+	redir https://www.fildah.com{uri} permanent
+}
+
+www.fildah.com {
 	encode zstd gzip
 	reverse_proxy fildah-web:80
 }
