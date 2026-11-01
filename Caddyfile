@@ -25,7 +25,7 @@ fildah.com {
 
 {$FILDAH_HOSTS:www.fildah.com} {
 	encode zstd gzip
-	reverse_proxy fildah-web:80
+	reverse_proxy fildah-web:3000
 }
 
 {$AUTH_HOST:auth.fildah.com} {

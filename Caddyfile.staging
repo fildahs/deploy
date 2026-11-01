@@ -20,7 +20,7 @@
 
 {$FILDAH_HOSTS} {
 	encode zstd gzip
-	reverse_proxy fildah-web:80
+	reverse_proxy fildah-web:3000
 }
 
 {$AUTH_HOST} {

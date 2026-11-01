@@ -33,14 +33,20 @@ URLS = {name: f'https://fsandcube-{host}.fildah.com' for name, host in {
     'VITE_ACCOUNT_BASE_URL': 'www', 'VITE_MARKETING_BASE_URL': 'www',
     'VITE_CARE_URL': 'care', 'VITE_BUSINESS_URL': 'business',
     'VITE_INDEX_URL': 'index', 'VITE_SITE_URL': 'index',
+    'FILDAH_SITE_URL': 'www',
 }.items()}
 BUILD_ARGS = {
     'auth-web': ('VITE_API_BASE_URL', 'VITE_ACCOUNT_BASE_URL', 'VITE_CARE_URL', 'VITE_BUSINESS_URL', 'VITE_INDEX_URL'),
     'care-web': ('VITE_API_BASE_URL', 'VITE_AUTH_BASE_URL', 'VITE_ACCOUNT_BASE_URL', 'VITE_MARKETING_BASE_URL'),
     'business-web': ('VITE_API_BASE_URL', 'VITE_AUTH_BASE_URL', 'VITE_BUSINESS_URL', 'VITE_CARE_URL', 'VITE_MARKETING_BASE_URL'),
     'index-web': ('VITE_API_BASE_URL', 'VITE_AUTH_BASE_URL', 'VITE_BUSINESS_URL', 'VITE_MARKETING_BASE_URL', 'VITE_SITE_URL'),
-    'fildah-web': ('VITE_API_BASE_URL', 'VITE_AUTH_BASE_URL', 'VITE_CARE_URL'),
+    'fildah-web': ('VITE_API_BASE_URL', 'VITE_AUTH_BASE_URL', 'VITE_CARE_URL', 'VITE_BUSINESS_URL', 'VITE_INDEX_URL', 'VITE_SITE_URL'),
 }
+
+
+def build_urls(repo):
+    return {name: URLS['FILDAH_SITE_URL'] if repo == 'fildah-web' and name == 'VITE_SITE_URL' else URLS[name]
+            for name in BUILD_ARGS.get(repo, ())}
 
 
 def run(args, **kwargs):
@@ -78,10 +84,7 @@ def commands(repo):
                  'TESTS=apps.identity.tests.test_google_security apps.identity.tests.test_accounts apps.identity.tests.test_mobile_auth apps.identity.tests.test_registration_flow']]
     if repo == 'deploy':
         return [['python3', '-m', 'unittest', 'discover', '-s', 'tests', '-v']]
-    result = [['npm', 'run', 'lint']]
-    if repo != 'fildah-web':
-        result.append(['npm', 'run', 'typecheck'])
-    result.extend([['npm', 'test'], ['npm', 'run', 'build']])
+    result = [['npm', 'run', 'lint'], ['npm', 'run', 'typecheck'], ['npm', 'test'], ['npm', 'run', 'build']]
     if repo in ('care-web', 'index-web', 'business-web'):
         result.extend([['npm', 'run', 'api:check'], ['npm', 'run', 'budget']])
     return result
@@ -137,7 +140,7 @@ def gate(directory):
                 log.write('$ ' + ' '.join(command) + '\n')
                 log.flush()
                 subprocess.run(command, cwd=ROOT if repo == 'api' else ROOT / repo,
-                               env=env, stdout=log, stderr=subprocess.STDOUT, check=True)
+                               env={**env, **build_urls(repo)}, stdout=log, stderr=subprocess.STDOUT, check=True)
         if select()[repo] != sources[repo] or gate_inputs(repo, sources) != inputs:
             raise ValueError(f'{repo}: gate inputs changed during checks')
         record_gate(checkpoint, inputs, path)
@@ -167,11 +170,11 @@ def build_commands(sources, context):
                 '--build-arg', f'APP_BUILD_SHA={sources[repo]}']
         if target:
             args.extend(['--target', target])
-        for name in BUILD_ARGS.get(repo, ()):
-            args.extend(['--build-arg', f'{name}={URLS[name]}'])
+        for name, value in build_urls(repo).items():
+            args.extend(['--build-arg', f'{name}={value}'])
         if repo == 'care-web':
             args.extend(['--build-arg', 'UNDER_CONSTRUCTION=false'])
-        if repo in ('auth-web', 'index-web'):
+        if repo in ('auth-web', 'index-web', 'fildah-web'):
             # BuildKit passes the value directly; never print it or use ARG.
             args.extend(['--secret', 'id=ui_token,env=UI_BUILD_TOKEN'])
         args.append(str(context / CONTEXTS.get(variable, repo)))

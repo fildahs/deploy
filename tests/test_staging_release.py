@@ -15,6 +15,16 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class LocalStagingReleaseTests(unittest.TestCase):
+    def test_website_build_uses_its_own_staging_canonical_origin(self):
+        builds = list(release.build_commands({repo: 'a' * 40 for repo in release.SOURCES}, Path('/export')))
+        website = next(args for name, _, args in builds if name == 'FILDAH_WEB_IMAGE')
+        index = next(args for name, _, args in builds if name == 'INDEX_WEB_IMAGE')
+        self.assertIn('VITE_SITE_URL=https://fsandcube-www.fildah.com', website)
+        self.assertEqual(release.build_urls('fildah-web')['VITE_SITE_URL'], 'https://fsandcube-www.fildah.com')
+        self.assertIn('VITE_SITE_URL=https://fsandcube-index.fildah.com', index)
+        self.assertIn('id=ui_token,env=UI_BUILD_TOKEN', website)
+        self.assertIn(['npm', 'run', 'typecheck'], release.commands('fildah-web'))
+
     def test_images_have_staging_destinations_and_distinct_care_package(self):
         selected = {repo: 'a' * 40 for repo in release.SOURCES}
         builds = list(release.build_commands(selected, Path('/export')))

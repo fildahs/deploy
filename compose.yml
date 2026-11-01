@@ -125,11 +125,12 @@ services:
     expose:
       - "80"
 
+  # Node, not nginx: public pages render on the server.
   fildah-web:
     image: ${FILDAH_WEB_IMAGE:-ghcr.io/fildahs/fildah-web:main}
     restart: unless-stopped
     expose:
-      - "80"
+      - "3000"
 
   # Node, not nginx: public pages render on the server (index-1 Slice 4).
   index-web:

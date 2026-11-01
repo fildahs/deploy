@@ -91,11 +91,11 @@ for attempt in $(seq 1 30); do
   sleep 2
 done
 [[ "$ready" = 1 ]]
-for service in auth-web care-web fildah-web; do
-  "${compose[@]}" exec -T "$service" wget -qO- http://127.0.0.1/build.txt | grep -Fx "$(sed -n "s/^$(case "$service" in auth-web) echo AUTH;; care-web) echo CARE;; fildah-web) echo FILDAH;; esac)_SHA=//p" .release)" > /dev/null
+for service in auth-web care-web; do
+  "${compose[@]}" exec -T "$service" wget -qO- http://127.0.0.1/build.txt | grep -Fx "$(sed -n "s/^$(case "$service" in auth-web) echo AUTH;; care-web) echo CARE;; esac)_SHA=//p" .release)" > /dev/null
 done
-for service in index-web business-web; do
-  expected="$(sed -n "s/^$(case "$service" in index-web) echo INDEX;; business-web) echo BUSINESS;; esac)_SHA=//p" .release)"
+for service in index-web business-web fildah-web; do
+  expected="$(sed -n "s/^$(case "$service" in index-web) echo INDEX;; business-web) echo BUSINESS;; fildah-web) echo FILDAH;; esac)_SHA=//p" .release)"
   "${compose[@]}" exec -T -e EXPECTED_SHA="$expected" "$service" node -e 'fetch("http://127.0.0.1:3000/build.txt").then(async r=>{if(!r.ok||(await r.text()).trim()!==process.env.EXPECTED_SHA)process.exit(1)}).catch(()=>process.exit(1))'
 done
 "${compose[@]}" exec -T worker celery -A config inspect ping --timeout 10

@@ -31,7 +31,7 @@ def config(*files, staging=False):
 
 
 class ComposeCompatibilityTests(unittest.TestCase):
-    def test_production_keeps_baseline_except_the_memory_cutover(self):
+    def test_production_keeps_baseline_except_memory_and_website_runtime(self):
         expected = config(BASELINE / 'compose.yml')
         actual = config(ROOT / 'compose.yml')
         self.assertEqual(actual['services']['embeddings']['environment']['EMBEDDINGS_BATCH_SIZE'], '16')
@@ -49,6 +49,7 @@ class ComposeCompatibilityTests(unittest.TestCase):
             definition['environment']['EMBEDDINGS_URL'] = 'http://embeddings:8080'
             definition['depends_on']['embeddings'] = actual['services'][service]['depends_on']['embeddings']
         expected['x-api-secrets'].pop('QDRANT_API_KEY', None)
+        expected['services']['fildah-web']['expose'] = ['3000']
         self.assertEqual(expected, actual)
 
     def test_staging_is_isolated_and_every_service_is_limited(self):
@@ -72,7 +73,7 @@ class ComposeCompatibilityTests(unittest.TestCase):
             with self.subTest(collection=collection), self.assertRaises(AssertionError):
                 assert_staging(bad)
 
-    def test_caddy_production_changes_only_the_bare_domain_redirect(self):
+    def test_caddy_production_changes_only_redirect_and_website_port(self):
         def adapt(file):
             return json.loads(run('docker', 'run', '--rm', '--network', 'none',
                                   '-e', 'CADDY_ACME_EMAIL=placeholder@example.invalid',
@@ -86,10 +87,11 @@ class ComposeCompatibilityTests(unittest.TestCase):
         self.assertEqual(handler, {'handler': 'static_response', 'status_code': 301,
                                   'headers': {'Location': ['https://www.fildah.com{http.request.uri}']}})
         www = next(route for route in routes if route.get('match') == [{'host': ['www.fildah.com']}])
-        self.assertEqual(www['handle'][0]['routes'][0]['handle'][-1]['upstreams'], [{'dial': 'fildah-web:80'}])
-        # Reverse only the intended redirect before comparing the frozen baseline.
+        self.assertEqual(www['handle'][0]['routes'][0]['handle'][-1]['upstreams'], [{'dial': 'fildah-web:3000'}])
+        # Reverse the intended website port and redirect before comparing the frozen baseline.
         text = (ROOT / 'Caddyfile').read_text()
         text = text.replace('fildah.com {\n\tredir https://www.fildah.com{uri} permanent\n}\n', '')
+        text = text.replace('fildah-web:3000', 'fildah-web:80')
         text = text.replace('{$FILDAH_HOSTS:www.fildah.com}', '{$FILDAH_HOSTS:fildah.com, www.fildah.com}')
         with tempfile.TemporaryDirectory() as directory:
             original = Path(directory) / 'Caddyfile'
