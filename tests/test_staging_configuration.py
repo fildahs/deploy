@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 import time
 import unittest
+from unittest import mock
 import uuid
 
 from scripts.assert_staging import assert_staging
@@ -72,6 +73,18 @@ class ComposeCompatibilityTests(unittest.TestCase):
             next(iter(bad[collection].values()))['external'] = True
             with self.subTest(collection=collection), self.assertRaises(AssertionError):
                 assert_staging(bad)
+
+    def test_staging_ssr_services_receive_runtime_access_credentials(self):
+        with mock.patch.dict(SAFE_ENV, {
+            'CF_ACCESS_CLIENT_ID': 'synthetic-access-id',
+            'CF_ACCESS_CLIENT_SECRET': 'synthetic-access-secret',
+        }):
+            data = config(ROOT / 'compose.yml', ROOT / 'compose.staging.yml', staging=True)
+        for name in ('fildah-web', 'index-web', 'business-web'):
+            with self.subTest(service=name):
+                environment = data['services'][name]['environment']
+                self.assertEqual(environment['CF_ACCESS_CLIENT_ID'], 'synthetic-access-id')
+                self.assertEqual(environment['CF_ACCESS_CLIENT_SECRET'], 'synthetic-access-secret')
 
     def test_caddy_production_changes_only_redirect_and_website_port(self):
         def adapt(file):

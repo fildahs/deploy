@@ -103,6 +103,9 @@ services:
     cpus: ${AUTH_WEB_CPU_LIMIT:-0.25}
     networks: !override [default]
   fildah-web:
+    environment:
+      CF_ACCESS_CLIENT_ID: ${CF_ACCESS_CLIENT_ID:-}
+      CF_ACCESS_CLIENT_SECRET: ${CF_ACCESS_CLIENT_SECRET:-}
     pull_policy: never
     mem_limit: ${FILDAH_WEB_MEMORY_LIMIT:-256m}
     cpus: ${FILDAH_WEB_CPU_LIMIT:-0.25}
