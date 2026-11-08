@@ -35,6 +35,8 @@ class LocalStagingReleaseTests(unittest.TestCase):
             self.assertNotIn('--push', args)
             self.assertIn('linux/amd64', args)
             self.assertNotIn('CF_ACCESS_CLIENT_SECRET', ' '.join(args))
+            if variable in {'AUTH_WEB_IMAGE', 'CARE_WEB_IMAGE', 'BUSINESS_WEB_IMAGE', 'INDEX_WEB_IMAGE', 'FILDAH_WEB_IMAGE'}:
+                self.assertIn('id=ui_token,env=UI_BUILD_TOKEN', args)
         care = next(args for name, _, args in builds if name == 'CARE_WEB_IMAGE')
         self.assertIn('fildah-staging/care-web:current', care)
         self.assertIn('UNDER_CONSTRUCTION=false', care)

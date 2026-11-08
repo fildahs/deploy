@@ -174,7 +174,7 @@ def build_commands(sources, context):
             args.extend(['--build-arg', f'{name}={value}'])
         if repo == 'care-web':
             args.extend(['--build-arg', 'UNDER_CONSTRUCTION=false'])
-        if repo in ('auth-web', 'index-web', 'fildah-web'):
+        if repo in ('auth-web', 'care-web', 'business-web', 'index-web', 'fildah-web'):
             # BuildKit passes the value directly; never print it or use ARG.
             args.extend(['--secret', 'id=ui_token,env=UI_BUILD_TOKEN'])
         args.append(str(context / CONTEXTS.get(variable, repo)))

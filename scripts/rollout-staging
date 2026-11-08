@@ -79,6 +79,9 @@ done
 "${compose[@]}" run --rm --no-deps api python manage.py migrate --noinput
 "${compose[@]}" run --rm --no-deps api python manage.py sync_platform_settings
 "${compose[@]}" up -d
+# Bind-file content changes do not trigger Compose recreation. Reload the proxy
+# with a fresh mount so the SSR website port and routes take effect.
+"${compose[@]}" up -d --no-deps --force-recreate caddy
 ready=0
 for attempt in $(seq 1 30); do
   if "${compose[@]}" exec -T embeddings python -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8080/health",timeout=5).read()' >/dev/null 2>&1; then ready=1; break; fi
