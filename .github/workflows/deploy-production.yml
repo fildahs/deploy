@@ -200,7 +200,7 @@ jobs:
               "SECRET_KEY",
               "PAYSTACK_SECRET_KEY", "PAYSTACK_PUBLIC_KEY", "BREVO_API_KEY",
           )
-          optional = ("OPENROUTER_API_KEY", "DEEPSEEK_API_KEY", "OPENAI_API_KEY")
+          optional = ("OPENROUTER_API_KEY", "DEEPSEEK_API_KEY", "OPENAI_API_KEY", "VAPID_PUBLIC_KEY", "VAPID_PRIVATE_KEY")
           missing = []
           for name in (*required, *optional):
               present = bool(os.environ.get(name, "").strip())

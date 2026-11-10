@@ -40,6 +40,8 @@ class ComposeCompatibilityTests(unittest.TestCase):
         del expected['services']['qdrant']
         del expected['volumes']['qdrant_data']
         expected['services']['postgres']['image'] = 'pgvector/pgvector:0.8.1-pg16'
+        for key in ('VAPID_PUBLIC_KEY', 'VAPID_PRIVATE_KEY', 'VAPID_SUBJECT'):
+            expected['x-api-secrets'][key] = ''
         for service in ('api', 'worker', 'attachment-worker', 'billing-beat'):
             definition = expected['services'][service]
             definition.get('depends_on', {}).pop('qdrant', None)
@@ -48,6 +50,8 @@ class ComposeCompatibilityTests(unittest.TestCase):
                 if not key.startswith('QDRANT_')
             }
             definition['environment']['EMBEDDINGS_URL'] = 'http://embeddings:8080'
+            for key in ('VAPID_PUBLIC_KEY', 'VAPID_PRIVATE_KEY', 'VAPID_SUBJECT'):
+                definition['environment'][key] = ''
             definition['depends_on']['embeddings'] = actual['services'][service]['depends_on']['embeddings']
         expected['x-api-secrets'].pop('QDRANT_API_KEY', None)
         expected['services']['fildah-web']['expose'] = ['3000']
