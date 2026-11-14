@@ -19,9 +19,9 @@ class LocalStagingReleaseTests(unittest.TestCase):
         builds = list(release.build_commands({repo: 'a' * 40 for repo in release.SOURCES}, Path('/export')))
         website = next(args for name, _, args in builds if name == 'FILDAH_WEB_IMAGE')
         index = next(args for name, _, args in builds if name == 'INDEX_WEB_IMAGE')
-        self.assertIn('VITE_SITE_URL=https://fsandcube-www.fildah.com', website)
-        self.assertEqual(release.build_urls('fildah-web')['VITE_SITE_URL'], 'https://fsandcube-www.fildah.com')
-        self.assertIn('VITE_SITE_URL=https://fsandcube-index.fildah.com', index)
+        self.assertIn('VITE_FILDAH_URL=https://fsandcube-www.fildah.com', website)
+        self.assertEqual(release.build_urls('fildah-web')['VITE_FILDAH_URL'], 'https://fsandcube-www.fildah.com')
+        self.assertIn('VITE_INDEX_URL=https://fsandcube-index.fildah.com', index)
         self.assertIn('id=ui_token,env=UI_BUILD_TOKEN', website)
         self.assertIn(['npm', 'run', 'typecheck'], release.commands('fildah-web'))
 

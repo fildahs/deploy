@@ -30,23 +30,20 @@ CONTEXTS = {'EMBEDDINGS_IMAGE': 'api/embeddings'}
 SHA_KEYS = dict(zip(SOURCES, ('API_SHA', 'AUTH_SHA', 'CARE_SHA', 'BUSINESS_SHA', 'INDEX_SHA', 'FILDAH_SHA', 'DEPLOY_SHA')))
 URLS = {name: f'https://fsandcube-{host}.fildah.com' for name, host in {
     'VITE_API_BASE_URL': 'api', 'VITE_AUTH_BASE_URL': 'auth',
-    'VITE_ACCOUNT_BASE_URL': 'www', 'VITE_MARKETING_BASE_URL': 'www',
-    'VITE_CARE_URL': 'care', 'VITE_BUSINESS_URL': 'business',
-    'VITE_INDEX_URL': 'index', 'VITE_SITE_URL': 'index',
-    'FILDAH_SITE_URL': 'www',
+    'VITE_FILDAH_URL': 'www', 'VITE_CARE_URL': 'care',
+    'VITE_BUSINESS_URL': 'business', 'VITE_INDEX_URL': 'index',
 }.items()}
 BUILD_ARGS = {
-    'auth-web': ('VITE_API_BASE_URL', 'VITE_ACCOUNT_BASE_URL', 'VITE_CARE_URL', 'VITE_BUSINESS_URL', 'VITE_INDEX_URL'),
-    'care-web': ('VITE_API_BASE_URL', 'VITE_AUTH_BASE_URL', 'VITE_ACCOUNT_BASE_URL', 'VITE_MARKETING_BASE_URL'),
-    'business-web': ('VITE_API_BASE_URL', 'VITE_AUTH_BASE_URL', 'VITE_BUSINESS_URL', 'VITE_CARE_URL', 'VITE_MARKETING_BASE_URL'),
-    'index-web': ('VITE_API_BASE_URL', 'VITE_AUTH_BASE_URL', 'VITE_BUSINESS_URL', 'VITE_MARKETING_BASE_URL', 'VITE_SITE_URL'),
-    'fildah-web': ('VITE_API_BASE_URL', 'VITE_AUTH_BASE_URL', 'VITE_CARE_URL', 'VITE_BUSINESS_URL', 'VITE_INDEX_URL', 'VITE_SITE_URL'),
+    'auth-web': ('VITE_API_BASE_URL', 'VITE_FILDAH_URL', 'VITE_CARE_URL', 'VITE_BUSINESS_URL', 'VITE_INDEX_URL'),
+    'care-web': ('VITE_API_BASE_URL', 'VITE_AUTH_BASE_URL', 'VITE_FILDAH_URL'),
+    'business-web': ('VITE_API_BASE_URL', 'VITE_AUTH_BASE_URL', 'VITE_BUSINESS_URL', 'VITE_CARE_URL', 'VITE_FILDAH_URL'),
+    'index-web': ('VITE_API_BASE_URL', 'VITE_AUTH_BASE_URL', 'VITE_BUSINESS_URL', 'VITE_FILDAH_URL', 'VITE_INDEX_URL'),
+    'fildah-web': ('VITE_API_BASE_URL', 'VITE_AUTH_BASE_URL', 'VITE_CARE_URL', 'VITE_BUSINESS_URL', 'VITE_INDEX_URL', 'VITE_FILDAH_URL'),
 }
 
 
 def build_urls(repo):
-    return {name: URLS['FILDAH_SITE_URL'] if repo == 'fildah-web' and name == 'VITE_SITE_URL' else URLS[name]
-            for name in BUILD_ARGS.get(repo, ())}
+    return {name: URLS[name] for name in BUILD_ARGS.get(repo, ())}
 
 
 def run(args, **kwargs):

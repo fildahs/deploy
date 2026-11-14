@@ -33,6 +33,36 @@ There is no staging image rollback/history; rebuild and redeploy when needed.
    The release is written only after all seven images succeed and inputs are
    rechecked. Current tags are `fildah-staging/<package>:current`.
 
+## Frontend URL settings
+
+Use one build-time setting per destination: `VITE_API_BASE_URL`,
+`VITE_AUTH_BASE_URL`, `VITE_FILDAH_URL`, `VITE_CARE_URL`,
+`VITE_BUSINESS_URL`, and `VITE_INDEX_URL`. `VITE_FILDAH_URL` covers the
+public site, account, billing and help. Index also uses `VITE_INDEX_URL`
+for canonical addresses and its sitemap; the public site uses `VITE_FILDAH_URL`.
+The staging script supplies these directly; no GitHub variable setup is needed
+for local staging builds. Before a future production CI build, configure
+`VITE_FILDAH_URL=https://www.fildah.com` in each frontend repository and
+`VITE_INDEX_URL=https://index.fildah.com` in Index. These replace the old
+account, marketing and site URL variables. Existing local shell/IDE overrides
+must use the new names too. Historical gate receipts must be regenerated for
+the changed source commits and URL configuration.
+
+Create a fine-grained GitHub personal access token with resource owner
+`fildahs`, repository access restricted to `ui`, and repository permission
+**Contents: Read-only**. Choose an expiry and obtain organization approval if
+GitHub requires it. In the shell that runs `make staging-build`, load the token
+without echoing it or writing its value into history:
+
+```bash
+read -rsp "Paste UI build token: " UI_BUILD_TOKEN
+export UI_BUILD_TOKEN
+echo
+```
+
+This token downloads the private UI source during builds. It is not a UUID
+or a VAPID browser-push key. Keep it out of runtime env files and git.
+
 ## Runtime and capacity
 
 Owner-approved SSH capacity checks precede rollout: memory, CPUs, disk, Docker
